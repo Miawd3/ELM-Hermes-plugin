@@ -1,0 +1,92 @@
+--- a/src/elm_memory/cli.py
++++ b/src/elm_memory/cli.py
+@@ -1920,9 +1920,7 @@
+ 
+ def _initial_markdown(project: str, today: str) -> dict[PurePosixPath, str]:
+     return {
+-        PurePosixPath("00_registry/ROOT_INDEX.md"): f"""# ELM Root Index
+-
+-Title: ELM Root Index
++        PurePosixPath("00_registry/ROOT_INDEX.md"): f"""Title: ELM Root Index
+ Scope: Entry point for this local memory root.
+ Tags: elm, registry, index
+ Related files: ../10_shared/SHARED_CONTEXT.md, ../20_projects/{project}/PROJECT_HUB.md
+@@ -1930,13 +1928,13 @@
+ Status: active
+ Summary: Start here to find shared context and active projects.
+ 
++# ELM Root Index
++
+ ## Working rule
+ 
+ Keep durable knowledge in Markdown. Treat `.elm/index.sqlite` as disposable derived state.
+ """,
+-        PurePosixPath("10_shared/SHARED_CONTEXT.md"): f"""# Shared Context
+-
+-Title: Shared Context
++        PurePosixPath("10_shared/SHARED_CONTEXT.md"): f"""Title: Shared Context
+ Scope: Durable facts and preferences shared across projects.
+ Tags: elm, shared, context
+ Related files: ../00_registry/ROOT_INDEX.md
+@@ -1944,13 +1942,13 @@
+ Status: active
+ Summary: Cross-project context that is useful to coding agents.
+ 
++# Shared Context
++
+ ## Current context
+ 
+ - Add only durable, decision-relevant information here.
+ """,
+-        PurePosixPath(f"20_projects/{project}/PROJECT_HUB.md"): f"""# {project} Project Hub
+-
+-Title: {project} Project Hub
++        PurePosixPath(f"20_projects/{project}/PROJECT_HUB.md"): f"""Title: {project} Project Hub
+ Scope: Entry point and durable overview for the {project} project.
+ Tags: project, hub, {project}
+ Related files: ACTIVE_CONTEXT.md, DECISIONS.md, ../../00_registry/ROOT_INDEX.md
+@@ -1958,6 +1956,8 @@
+ Status: active
+ Summary: Project purpose, boundaries, and links to current work and decisions.
+ 
++# {project} Project Hub
++
+ ## Purpose
+ 
+ - Describe what this project is trying to achieve.
+@@ -1966,9 +1966,7 @@
+ 
+ - Record durable constraints that should survive across agent sessions.
+ """,
+-        PurePosixPath(f"20_projects/{project}/ACTIVE_CONTEXT.md"): f"""# {project} Active Context
+-
+-Title: {project} Active Context
++        PurePosixPath(f"20_projects/{project}/ACTIVE_CONTEXT.md"): f"""Title: {project} Active Context
+ Scope: Current task state, next actions, and decision-sensitive open questions.
+ Tags: project, active-context, {project}
+ Related files: PROJECT_HUB.md, DECISIONS.md
+@@ -1976,19 +1974,21 @@
+ Status: active
+ Summary: The smallest current-state handoff needed to continue work.
+ 
++# {project} Active Context
++
+ ## Current state
+ 
+ - Add the current milestone and the next concrete action.
+ """,
+-        PurePosixPath(f"20_projects/{project}/DECISIONS.md"): f"""# {project} Decisions
+-
+-Title: {project} Decisions
++        PurePosixPath(f"20_projects/{project}/DECISIONS.md"): f"""Title: {project} Decisions
+ Scope: Accepted project decisions and the reasons that should not be rediscovered.
+ Tags: project, decisions, {project}
+ Related files: PROJECT_HUB.md, ACTIVE_CONTEXT.md
+ Last updated: {today}
+ Status: active
+ Summary: Durable decisions for the project.
++
++# {project} Decisions
+ 
+ ## Accepted decisions
+ 

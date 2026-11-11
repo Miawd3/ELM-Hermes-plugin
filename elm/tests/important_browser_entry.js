@@ -1,0 +1,12 @@
+import {createElement as h} from 'react';
+import {createRoot} from 'react-dom/client';
+import * as plugin from '../desktop/plugin.js';
+import {host,activationEpoch} from './important_sdk_fixture.js';
+const registrations=[],dispose=[];
+const ctx={rest:async(p,o={})=>{const r=await fetch('/api/plugins/elm'+p,{method:o.method||'GET',headers:{'Content-Type':'application/json'},body:o.body?JSON.stringify(o.body):undefined});const d=await r.json();if(!r.ok)throw Error(d.message||d.detail||'API failure');return d;},register:x=>registrations.push(x),onDispose:f=>dispose.push(f),os:{writeClipboard:async text=>{window.copied=text;return true;}}};
+plugin.default.register(ctx);
+const important=registrations.find(x=>x.id==='important-page');
+if(!important)throw Error('Important results page is not registered');
+const root=createRoot(document.getElementById('root'));
+root.render(h(important.render));
+window.importantFixture={directive:id=>{const slot=document.createElement('div');document.body.append(slot);const component=registrations.find(x=>x.id==='important-directive');if(!component)throw Error('Own-result directive missing');const mounted=createRoot(slot);mounted.render(h(component.data.render,{attrs:{id}}));dispose.push(()=>{mounted.unmount();slot.remove();});},session:id=>host.state.focusedStoredSessionId.set(id),owner:profile=>host.state.focusedSessionOwner.set({profile,connectionId:'local'}),gateway:g=>host.state.gateway.set(g),epoch:()=>activationEpoch.set(activationEpoch.get()+1),dispose:()=>{root.unmount();dispose.forEach(f=>f());}};

@@ -1,0 +1,276 @@
+--- a/engine/elm_memory/cli.py
++++ b/engine/elm_memory/cli.py
+@@ -18,6 +18,9 @@
+ import tempfile
+ import time
+ from datetime import datetime, timezone
++from concurrent.futures import ThreadPoolExecutor
++from contextlib import closing
++from fractions import Fraction
+ from typing import Iterable
+ 
+ from . import __version__
+@@ -244,7 +247,11 @@
+ 
+ 
+ def iter_markdown(root: Path) -> Iterable[Path]:
+-    for p in root.rglob("*.md"):
++    paths = sorted(
++        root.rglob("*.md"),
++        key=lambda p: (relpath(root, p).casefold(), relpath(root, p)),
++    )
++    for p in paths:
+         if ".elm" in p.parts:
+             continue
+         if p.is_file():
+@@ -608,7 +615,9 @@
+         )
+ 
+ 
+-def _policy_sql(alias: str, args) -> tuple[list[str], list[object]]:
++def _policy_sql(
++    alias: str, args, *, policy_moment: str | None = None,
++) -> tuple[list[str], list[object]]:
+     conditions: list[str] = []
+     params: list[object] = []
+     if not args.include_archive:
+@@ -620,7 +629,7 @@
+         conditions.append(f"{alias}.namespace=?")
+         params.append(args.namespace)
+     if not getattr(args, "include_history", False):
+-        moment = now_iso()
++        moment = policy_moment if policy_moment is not None else now_iso()
+         conditions.append(
+             f"NOT EXISTS (SELECT 1 FROM claims policy_claim WHERE policy_claim.document_id={alias}.id "
+             "AND (policy_claim.status<>'accepted' OR policy_claim.valid_from>? "
+@@ -657,11 +666,12 @@
+     *,
+     limit: int | None = None,
+     broad: bool | None = None,
++    policy_moment: str | None = None,
+ ) -> list[dict]:
+     fts = safe_fts_query(query, broad=args.broad if broad is None else broad)
+     conditions = ["sections_fts MATCH ?"]
+     params: list[object] = [fts]
+-    policy_conditions, policy_params = _policy_sql("d", args)
++    policy_conditions, policy_params = _policy_sql("d", args, policy_moment=policy_moment)
+     conditions.extend(policy_conditions)
+     params.extend(policy_params)
+     if args.status:
+@@ -702,7 +712,8 @@
+         WHERE {' AND '.join(conditions)}
+         ORDER BY score DESC,
+                  CASE WHEN c.authority='agent_curated' THEN 1 ELSE 0 END,
+-                 d.last_updated DESC
++                 d.last_updated DESC,
++                 s.section_key COLLATE BINARY
+         LIMIT ?
+     """
+     params.append(args.limit if limit is None else limit)
+@@ -716,6 +727,77 @@
+         results.append(item)
+     return results
+ 
++
++
++CONTEXT_RRF_K = 60
++
++
++def fuse_search_lanes(strict: list[dict], broad: list[dict], limit: int) -> list[dict]:
++    """Bounded, equal-weight RRF with exact scores and stable public-key ties.
++
++    Original row scores remain BM25 values. Fusion changes candidate order only;
++    it never changes scope predicates, body text, authority, or source identity.
++    """
++    strict_ranks = {r["section_key"]: i + 1 for i, r in enumerate(strict)}
++    broad_ranks = {r["section_key"]: i + 1 for i, r in enumerate(broad)}
++    rows = {r["section_key"]: r for r in broad}
++    rows.update({r["section_key"]: r for r in strict})
++    missing = max(len(strict), len(broad)) + 1
++
++    def ordering(key):
++        sr = strict_ranks.get(key, missing)
++        br = broad_ranks.get(key, missing)
++        score = (Fraction(1, CONTEXT_RRF_K + sr) if key in strict_ranks else 0)
++        score += Fraction(1, CONTEXT_RRF_K + br) if key in broad_ranks else 0
++        return -score, min(sr, br), sr, br, key
++
++    return [rows[key] for key in sorted(rows, key=ordering)[:limit]]
++
++
++def search_context_candidates(
++    root: Path, query: str, args, *, policy_moment: str,
++) -> tuple[list[dict], dict]:
++    """Run bounded lexical lanes on separate read-only connections.
++
++    The caller must bracket this and supplemental selection with an index
++    data_version check. Each worker owns and closes its connection. Any lane
++    failure refuses the entire read rather than silently changing admission.
++    """
++    def lane(broad):
++        con = connect_readonly(root, lock_timeout=args.lock_timeout)
++        try:
++            return search_sections(
++                con, query, args, limit=args.limit, broad=broad,
++                policy_moment=policy_moment,
++            )
++        finally:
++            con.close()
++
++    # Avoid redundant work for a single searchable term, including punctuation.
++    if safe_fts_query(query, False) == safe_fts_query(query, True):
++        strict = lane(False)
++        broad = strict
++        lane_count = 1
++    else:
++        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="elm-lexical") as pool:
++            strict_future = pool.submit(lane, False)
++            broad_future = pool.submit(lane, True)
++            strict, broad = strict_future.result(), broad_future.result()
++        lane_count = 2
++    results = fuse_search_lanes(strict, broad, args.limit)
++    return results, {
++        "policy": "strict_broad_rrf",
++        "rrf_k": CONTEXT_RRF_K,
++        "lane_count": lane_count,
++        "per_lane_limit": args.limit,
++        "final_limit": args.limit,
++        "strict_count": len(strict),
++        "broad_count": len(broad),
++        "candidate_count": len(results),
++        # Retain the old field meaning, even though broad admission now always
++        # participates. Use policy/counts to distinguish union from fallback.
++        "fallback_used": not strict and bool(broad),
++    }
+ 
+ def command_search(args, con: sqlite3.Connection, root: Path):
+     _prepare_governed_read(args, con, root)
+@@ -736,11 +818,16 @@
+     con: sqlite3.Connection,
+     args,
+     project: str | None,
++    *,
++    policy_moment: str | None = None,
+ ) -> list[dict]:
+     if not project:
+         return []
+     conditions = ["d.is_archive=0", "d.project=?"]
+     params: list[object] = [project]
++    policy_conditions, policy_params = _policy_sql("d", args, policy_moment=policy_moment)
++    conditions.extend(policy_conditions)
++    params.extend(policy_params)
+     if args.namespace:
+         conditions.append("d.namespace=?")
+         params.append(args.namespace)
+@@ -774,7 +861,7 @@
+                 WHEN lower(s.heading) LIKE '%constraint%' THEN 0
+                 WHEN lower(d.path) LIKE '%/active_context.md' THEN 1
+                 ELSE 2 END,
+-                d.last_updated DESC,s.ordinal
++                d.last_updated DESC,s.ordinal,s.section_key COLLATE BINARY
+             LIMIT 4""",
+         params,
+     ).fetchall()
+@@ -787,6 +874,14 @@
+     return results
+ 
+ 
++def _index_file_identity(root: Path) -> tuple[int, int]:
++    try:
++        stat = db_path(root).stat()
++        return stat.st_dev, stat.st_ino
++    except OSError as exc:
++        raise ReadOnlyIndexError("Index disappeared during context retrieval; retry the read.") from exc
++
++
+ def command_context(args, con: sqlite3.Connection, root: Path):
+     started = time.perf_counter()
+     if args.budget < MIN_CONTEXT_BUDGET:
+@@ -799,30 +894,46 @@
+         raise ValueError("Trace retention days cannot be negative.")
+     _prepare_governed_read(args, con, root)
+ 
+-    results = search_sections(con, args.task, args, limit=args.limit, broad=False)
+-    fallback_used = False
+-    if not results and len(WORD_RE.findall(args.task)) > 1:
+-        results = search_sections(con, args.task, args, limit=args.limit, broad=True)
+-        fallback_used = bool(results)
+-
+-    projects = {
+-        str(item["project"])
+-        for item in results[:5]
+-        if item.get("project") is not None
+-    }
+-    resolved_project = args.project
+-    scope_warnings: list[str] = []
+-    if resolved_project is None and len(projects) == 1:
+-        resolved_project = next(iter(projects))
+-        scope_warnings.append(
+-            f"Project scope was inferred from the top retrieval candidates as {resolved_project}."
+-        )
+-    elif resolved_project is None and len(projects) > 1:
+-        scope_warnings.append(
+-            "Project scope is ambiguous; pass --project to prevent cross-project context mixing."
+-        )
+-
+-    supplemental = _context_supplemental_sections(con, args, resolved_project)
++    if con.in_transaction:
++        raise ReadOnlyIndexError("Context retrieval requires a committed index connection.")
++    # Rebuild replaces the database file. Monitor a fresh connection and its
++    # file identity, not a caller connection that may reference an older inode.
++    initial_identity = _index_file_identity(root)
++    with closing(connect_readonly(root, lock_timeout=args.lock_timeout)) as read_con:
++        version_before = read_con.execute("PRAGMA data_version").fetchone()[0]
++        policy_moment = now_iso()
++        results, retrieval = search_context_candidates(
++            root, args.task, args, policy_moment=policy_moment,
++        )
++        fallback_used = retrieval["fallback_used"]
++
++        projects = {
++            str(item["project"])
++            for item in results[:5]
++            if item.get("project") is not None
++        }
++        resolved_project = args.project
++        scope_warnings: list[str] = []
++        if resolved_project is None and len(projects) == 1:
++            resolved_project = next(iter(projects))
++            scope_warnings.append(
++                f"Project scope was inferred from the top retrieval candidates as {resolved_project}."
++            )
++        elif resolved_project is None and len(projects) > 1:
++            scope_warnings.append(
++                "Project scope is ambiguous; pass --project to prevent cross-project context mixing."
++            )
++
++        supplemental = _context_supplemental_sections(
++            read_con, args, resolved_project, policy_moment=policy_moment,
++        )
++        _require_stable_governance(root)
++        if read_con.execute("PRAGMA data_version").fetchone()[0] != version_before:
++            raise ReadOnlyIndexError(
++                "Index changed during context retrieval; retry against a stable index."
++            )
++        if _index_file_identity(root) != initial_identity:
++            raise ReadOnlyIndexError("Index was replaced during context retrieval; retry the read.")
+     # FTS matches stay first so a small budget cannot be consumed entirely by
+     # generic current-state supplements before the task-relevant source appears.
+     candidates = results + supplemental
+@@ -880,6 +991,7 @@
+                 "error": str(exc),
+             }
+     response["fallback_used"] = fallback_used
++    response["retrieval"] = retrieval
+     response["latency_ms"] = round(latency_ms, 3)
+     emit(response, args.json)
+ 
+@@ -2116,7 +2228,7 @@
+     add_read_policy(p)
+     p.add_argument("--status")
+     p.add_argument("--path-prefix")
+-    p.add_argument("--limit", type=int, default=24, help="Maximum FTS candidates considered before packing.")
++    p.add_argument("--limit", type=int, default=24, help="Maximum candidates per lexical lane and after fusion, before packing.")
+     p.add_argument("--broad", action="store_true", help=argparse.SUPPRESS)
+     p.add_argument("--no-sync", action="store_true")
+     trace_mode = p.add_mutually_exclusive_group()

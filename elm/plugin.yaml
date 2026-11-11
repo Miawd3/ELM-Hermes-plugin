@@ -1,0 +1,16 @@
+name: elm
+version: 0.1.0-rc1
+description: "Experimental local project memory with explicit-tool-only recall by default and permission-gated notes."
+author: ELM plugin contributors
+license: Apache-2.0
+kind: standalone
+requires_hermes: ">=0.22.7"
+python_dependencies: []
+requires_env: []
+provides_tools: []
+provides_hooks: []
+capabilities: []
+tags:
+  - memory
+  - local
+  - project-memory

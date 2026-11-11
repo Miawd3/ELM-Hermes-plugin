@@ -1,0 +1,89 @@
+{
+  "upstream_repository": "https://github.com/Miawd3/elm-memory",
+  "upstream_commit": "d687f0a48dbe841d7d8b85b801900c6cdc63ee7d",
+  "upstream_version": "1.0.1.dev0",
+  "license": "Apache-2.0",
+  "source_only": true,
+  "modifications": [
+    {
+      "patch": "patches/init-metadata.patch",
+      "sha256": "23fbb498f6de728de742ae68fe9355ef625f80f845b2499e565042f853cad191",
+      "description": "Move metadata before H1 in five init templates; parser unchanged.",
+      "regression": "../tests/test_init_metadata.py"
+    }
+  ],
+  "files": [
+    {
+      "path": "elm_memory/__init__.py",
+      "sha256": "17fb9198886b806f5bd974949c5c4542c639699190da92ebce2bb055b856dc08",
+      "upstream_sha256": "17fb9198886b806f5bd974949c5c4542c639699190da92ebce2bb055b856dc08",
+      "modified": false
+    },
+    {
+      "path": "elm_memory/__main__.py",
+      "sha256": "3d2438ae92f4746e9ffaa1f837b1fe803f6281091d1f31f8c95643716f257d9a",
+      "upstream_sha256": "3d2438ae92f4746e9ffaa1f837b1fe803f6281091d1f31f8c95643716f257d9a",
+      "modified": false
+    },
+    {
+      "path": "elm_memory/atomic.py",
+      "sha256": "1622af705f0ca50fbdf3586e666d9696dc9bca86b0b761ea9da0fe10db96ec35",
+      "upstream_sha256": "1622af705f0ca50fbdf3586e666d9696dc9bca86b0b761ea9da0fe10db96ec35",
+      "modified": false
+    },
+    {
+      "path": "elm_memory/canonical.py",
+      "sha256": "b65c759f18e9c818fa05dfd40d5258e264e66cc3057dc36e487af29e4e549b41",
+      "upstream_sha256": "b65c759f18e9c818fa05dfd40d5258e264e66cc3057dc36e487af29e4e549b41",
+      "modified": false
+    },
+    {
+      "path": "elm_memory/cli.py",
+      "sha256": "75ee545b298f17ce73e3253a34c70da30cdada5072f1c93a04e4fb1602e10eaa",
+      "upstream_sha256": "d59d1da9c79ab3c00a95432dcc4105f1bd41651e0d6e1b57fadea3634f2b91e6",
+      "modified": true
+    },
+    {
+      "path": "elm_memory/context.py",
+      "sha256": "e2cefb5a81c9028abbf70ac17c723cb5783e782121c262bfc8d78d644596f45e",
+      "upstream_sha256": "e2cefb5a81c9028abbf70ac17c723cb5783e782121c262bfc8d78d644596f45e",
+      "modified": false
+    },
+    {
+      "path": "elm_memory/governance.py",
+      "sha256": "801a6ebf8b1ce4a046a90580fa003dff41b216defcf669685c991296d2c23618",
+      "upstream_sha256": "801a6ebf8b1ce4a046a90580fa003dff41b216defcf669685c991296d2c23618",
+      "modified": false
+    },
+    {
+      "path": "elm_memory/identity.py",
+      "sha256": "dd30183b239b0d8562b2bc5914fdae96f395a663ec34a13ade3719e2819820d3",
+      "upstream_sha256": "dd30183b239b0d8562b2bc5914fdae96f395a663ec34a13ade3719e2819820d3",
+      "modified": false
+    },
+    {
+      "path": "elm_memory/locking.py",
+      "sha256": "13127eeb64be2a34469efcecc3c24e3f12ad59f814352d70f91723bd16a9b93e",
+      "upstream_sha256": "13127eeb64be2a34469efcecc3c24e3f12ad59f814352d70f91723bd16a9b93e",
+      "modified": false
+    },
+    {
+      "path": "elm_memory/mcp_server.py",
+      "sha256": "b28f998d8aef2ea2a09ccfcd433a0a938b7ddceb0a4f1e11aeb122ca9fec76a2",
+      "upstream_sha256": "b28f998d8aef2ea2a09ccfcd433a0a938b7ddceb0a4f1e11aeb122ca9fec76a2",
+      "modified": false
+    },
+    {
+      "path": "elm_memory/schema.py",
+      "sha256": "ed237f151090767168e07cbb3c45f1759f757126c000470996017e22092df150",
+      "upstream_sha256": "ed237f151090767168e07cbb3c45f1759f757126c000470996017e22092df150",
+      "modified": false
+    },
+    {
+      "path": "elm_memory/tokens.py",
+      "sha256": "a6ac234685844eb09422dc60aafa7add7d50110f94dc7f3b10fbf731051c439a",
+      "upstream_sha256": "a6ac234685844eb09422dc60aafa7add7d50110f94dc7f3b10fbf731051c439a",
+      "modified": false
+    }
+  ]
+}

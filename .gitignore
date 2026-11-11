@@ -1,0 +1,11 @@
+.env
+.env.*
+auth.json
+*.db
+*.sqlite*
+__pycache__/
+.pytest_cache/
+node_modules/
+.venv/
+logs/
+sessions/
