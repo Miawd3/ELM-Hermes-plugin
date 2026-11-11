@@ -1,5 +1,18 @@
 # ELM for Hermes
 
+## Install in Hermes
+
+1. Open **Plugins → Install from GitHub / Git URL**.
+2. Copy this into **Git URL or owner/repo**:
+
+   ```text
+   https://github.com/Miawd3/ELM-Hermes-plugin.git#elm
+   ```
+
+   Keep `#elm`: it selects the installable `elm/` folder.
+3. Turn **Enable after install** off, then click **Install**.
+4. On a compatible host, complete the [memory-store setup](elm/README.md#install-and-set-up-a-disposable-profile), select **elm** under **Plugins → Memory provider**, click **Save provider settings**, and start a **new conversation**. Installing alone does not configure memory.
+
 > **Experimental source candidate.** The current upstream Hermes host checked on 11 November 2026 lacks the session/project ownership APIs used by ELM's optional workspace and private-chat layer. That layer is not working on this checked stock host, and the full root test suite is not green. The offline core demo and selected regression checks pass. Please read [current test results](TEST_REPORT.md) before installation. The illustrations below explain the architecture; they are not screenshots or performance measurements.
 
 ELM, **External Local Memory**, gives Hermes a local, inspectable foundation for long-running work. Keep project knowledge outside the conversation, retrieve relevant evidence when you need it, and follow the source when a detail matters.
