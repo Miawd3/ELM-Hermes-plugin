@@ -1,0 +1,35 @@
+# r17: production-oriented transport, local qualification only
+
+## Not a live extraction feature
+
+ELM's curation RPC still has `dispatch_supported=false` and refuses dispatch. No credentials are read, stored, selected or supplied. No paid API or external model endpoint is used in qualification. The existing auxiliary LLM router remains unsuitable for recipient-pinned egress. A separate direct transport and durable attempt protocol are experimental prerequisites, not a configured production capability. `production_contract()` still refuses. The legacy status reason code `host_route_not_pinnable` refers to the offered curation facade, not a claim that the experimental transport lacks an endpoint field.
+
+## Exact recipient and body
+
+`hermes_cli.plugin_llm_transport.HttpsTransport(endpoint)` accepts only an explicit HTTPS URL with `/v1/chat/completions`, no user information, query, fragment, control characters or backslashes. It uses `http.client.HTTPSConnection` directly with `ssl.create_default_context()`: certificate trust and hostname validation stay enabled. It does not use the auxiliary router, SDK, environment proxies, cookies, redirect handlers or retry/fallback loops. Only status 200 with identity response encoding is accepted. A redirect is an error, not followed.
+
+This slice intentionally has **no authentication support**. An endpoint may be specified to the internal adapter by trusted host configuration/tests, but no public route-selection RPC or configured authenticated production route exists. Do not send real private sources to an endpoint with this experimental seam.
+
+The adapter checks equality with its prepared recipient and sends the frozen canonical JSON body unchanged. Model is inside the hashed body. Content-Type/Accept are JSON, encoding identity, connection close; no Authorization/Cookie is generated. The inherited preview binds native owner, immutable body, model and trusted source/policy fingerprint. Native read admission is checked both before the ledger claim and again after its durable commit, immediately before network invocation. A failure after claim retains an attempted marker without sending. Native read locks are not held across network I/O; revoke after admission cannot retract bytes.
+
+`_LoopbackTransport` is a private, explicit test-only adapter that permits HTTP only to literal `127.0.0.1` or `::1`. It does not relax the HTTPS constructor or get selected by production settings. Local tests can verify received bytes and count attempts without a real provider or real credentials. They do not establish public DNS, production TLS/credential behavior, provider billing or model semantics.
+
+## Durable pre-send claim
+
+`AttemptLedger(path, create=True)` explicitly creates a new file with exclusive creation and restrictive permissions, schema/version marker, SQLite rollback journaling and `synchronous=FULL`, followed by parent-directory fsync. Existing paths are never silently overwritten. Ordinary `AttemptLedger(path)` only opens existing state using SQLite `mode=rw`; missing/corrupt/incompatible state refuses. Known symlinks in the database path, ancestors and SQLite sidecars are rejected. An already-open instance refuses observed file replacement. This is not a hostile-filesystem sandbox or protection against someone rewriting/restoring an old valid database in place.
+
+The trusted path is never accepted from a plugin RPC. Creating a fresh ledger is for a new installation/qualification fixture, **not recovery of missing state for old attempts**. No recovered jobs are reconstructed or automatically sent. A future recovery service must retain the ledger's identity and refuse absent/rolled-back history rather than initialize a new ledger for recovered jobs.
+
+For each prepared token, `attempt_id` is its SHA-256. Before any transport invocation, `_durable_contract` commits a unique `attempted` row under `BEGIN IMMEDIATE`. The row contains only attempt ID, owner digest, payload digest, a combined binding digest and state. The combined digest covers native owner identity, recipient settings, model, body digest and the trusted source/consent freshness fingerprint. No source text, model output, raw principal/profile, endpoint string, token or credentials are stored in the ledger.
+
+The unique primary key rejects a second claim across processes and reopened ledger instances. An ambiguous/failed claim prevents I/O. A successful bounded response allows state `completed`; failure to record completion still reports uncertainty. `attempted` includes crashes before actual I/O as well as possible sends: it must never be treated as permission to retry. `completed` means a bounded response was received and locally recorded, not that a proposal was valid, approved, billed exactly once or delivered to a user. No model responses enter records automatically.
+
+The ledger stops at 10,000 attempts with no eviction/purge. Capacity or storage failures refuse new work. Parent-directory/fsync behavior is platform-specific; local Linux qualification is not a universal durability proof. There is no distributed transaction with the server and no exactly-once remote execution guarantee.
+
+## Bounds and unknown outcomes
+
+Body limit is 32,768 bytes, configured output-token cap 1–512, response limit at most 8,192 bytes and timeout metadata 1–30 seconds. Response reading is incremental, rejects oversized declared/actual bodies, rejects nonidentity compression and detects truncated declared lengths. Socket deadlines are reduced between connect/send/headers/read steps. This is not a hard real-time bound: platform DNS resolution and blocking system/TLS calls may outlive the desired wall-clock deadline; header parsing follows stdlib's own line/count limits. In particular, a server slowly trickling status/header bytes inside stdlib getresponse() can exceed the desired total wall-clock deadline despite each socket read staying below its inactivity timeout. The current adapter does not enforce a hard total execution bound. No automatic retry is used to compensate. Future production qualification must resolve these limits explicitly.
+
+After transport admission, any failure is conservatively outcome-uncertain and the token cannot replay. Error details are fixed/non-secret for ordinary exceptions; interruption-style BaseException remains propagated with an uncertainty note as documented in r16. Close/cancel do not interrupt an already-admitted request. The durable row remains available for explicit reconciliation, not automatic resend. A newly prepared and separately confirmed request is a distinct attempt and could duplicate a prior unknown remote effect; the current UI offers neither operation.
+
+There is still no price estimate, currency spending enforcement, authenticated recipient selection, durable source-consent job recovery, real provider test or production activation. r16's pure contract checks and r15's local payload/proposal validation remain separate from this local transport qualification.

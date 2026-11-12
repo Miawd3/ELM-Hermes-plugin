@@ -1,9 +1,9 @@
-# Experimental release boundary
+# Experimental candidate boundary
 
-The current product contract is README.md, CAPABILITIES.md, API.md, SECURITY.md and docs/WORKFLOW.md, all inside this installable directory. The separate validation evidence binds exact source hashes and documents passed, failed and untested stages.
+The active contract is README.md, CAPABILITIES.md, API.md, SECURITY.md and the linked scoped feature documents. This r21 candidate requires the exact pinned host base plus the accompanying host patch. It is not a public release or drop-in stock plugin.
 
-Canonical recall is explicit-tool-only by default. Optional legacy background recall is retained for compatibility and carries the stock-host authority-labeling risk. The source-only engine is unchanged from the input reconciliation candidate; plugin defaults, setup, demo, portable tests and current documentation are updated for this release.
+The active entrypoint has no legacy model tools/prefetch/global draft command. Private recall and local capture are separate default-off opt-ins. Project access requires explicit binding and per-chat consent. Live curation dispatch remains disabled; synthetic/local transport tests are not production provider qualification.
 
-Process-local span validation, the durable quarantine inbox, the operator pending-proposal bridge and conservative reconciliation are separate layers. None establishes semantic truth, accepts a canonical claim, or implements general natural-language learning. See CAPABILITIES.md rather than historical milestone files for the current feature matrix.
+Historical engine, setup scripts and archived documents remain recovery/provenance material. They do not authorize adoption, configure scoped memory or establish current provider behavior. Source inventories establish file integrity, not semantic correctness, ownership or an independent signature.
 
-No live deployment, real user data, publication, model call or answer-quality claim is part of this release. Public repository identity/catalog submission remain unperformed. A local source commit and SHA-256 manifest are integrity/provenance evidence, not a public release or independent signature.
+No live installation, real user-data migration, paid model call, public publishing or production claim is implied. See the enclosing checkpoint's exact-byte qualification and gaps before considering any separate rollout.

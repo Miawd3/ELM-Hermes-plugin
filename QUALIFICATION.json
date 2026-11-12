@@ -1,85 +1,12 @@
 {
-  "schema": "ELM_CATALOG_EXPORT_QUALIFICATION/1",
-  "upstream_commit": "ea694a0c0a6a8b75b47332f0f92bae2087f10e8f",
-  "inherited_qualification_historical_only": {
-    "schema": "ELM_PRIVATE_CONTROLS_ACCEPTANCE/1",
-    "package_sha256": "91333a1c732ac06073d9c979e44f9a8ff675bc329f39a5ec936cb9999c2b1b87",
-    "members": 183,
-    "counts": {
-      "python_files": 11,
-      "python_methods": 90,
-      "javascript_controller_cases": 7,
-      "legacy_important_cases": 5,
-      "legacy_memory_cases": 85,
-      "browser_scenarios": 6,
-      "new_engineering_model_calls": 0,
-      "qualified_host": "preserved Hermes 0.23, existing dependencies",
-      "live_native_acceptance": false,
-      "independent_review": "Gemini attempt timed out without a verdict; no independent current-byte approval claimed"
-    },
-    "extracted_consumer_tests": 76,
-    "validator_accepted": true,
-    "outside_extraction_refused": true,
-    "new_model_calls": 0,
-    "live_activation": false,
-    "cap": "unsupported/off; enabling refused",
-    "independent_review": "Gemini attempt timed out; no independent approval claimed"
-  },
-  "current_export": {
-    "state": "experimental_source_candidate_not_release_ready",
-    "plugin_updater": "removed",
-    "official_host_commit": "6a0d2d12815c0546b0bcaf05046e2fe3293f60aa",
-    "official_validator": {
-      "passed": true,
-      "checks": 16,
-      "security_scan": "safe",
-      "private_core_import_warning_locations": 21,
-      "catalog_acceptance": false
-    },
-    "root_tests_pinned_host_plus_optional_tokenizer": {
-      "executions": 338,
-      "passed": 264,
-      "errors": 73,
-      "skipped": 1,
-      "error_categories": {
-        "removed_set_session_project_in_fixtures": 62,
-        "removed_resolve_session_project_at_runtime": 5,
-        "retained_tests_for_disabled_updater": 5,
-        "owned_native_mount_runner_required": 1
-      },
-      "additional_dependencies": {
-        "tiktoken": "0.14.0",
-        "regex": "2026.9.29"
-      },
-      "changed_hermes_dependency_pins": 0
-    },
-    "inherited_regression_executions": {
-      "regression": 356,
-      "prior_audit": 158,
-      "audit": 150,
-      "reconciliation_safety": 19,
-      "all_passed": true,
-      "counts_overlap": true
-    },
-    "focused_catalog_guards": {
-      "passed": 5
-    },
-    "native_draft_bridge": {
-      "passed": 16,
-      "model_completions": "synthetic"
-    },
-    "durable_records": {
-      "passed": 19
-    },
-    "offline_demo": {
-      "passed": true,
-      "live_model": false
-    },
-    "full_qualification": false,
-    "workspace_compatibility": "blocked_missing_authoritative_host_API",
-    "live_model_calls": 0,
-    "independent_security_certification": false,
-    "ui_copy": "Plugin update wording reconciled after tests; JavaScript syntax and final validator rerun, no runtime logic changed."
-  },
-  "publication_presentation": "Root README, architecture illustrations, and test-report packaging updated; plugin subtree bytes unchanged from the sanitized preparation bundle."
+  "schema": "ELM_RESTORATION_SOURCE_QUALIFICATION/1",
+  "candidate": "0.1.0-rc40",
+  "host_base": "126980e47b826963b26bf57d210106d849322f8a",
+  "required_host_patch": "integration/host.patch",
+  "portable_node_passes": 164,
+  "full_suite_green": false,
+  "production_organizer_enabled": false,
+  "model_backed_search_agent_implemented": false,
+  "live_windows_acceptance": false,
+  "report": "TEST_REPORT.md"
 }

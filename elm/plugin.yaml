@@ -1,6 +1,6 @@
 name: elm
-version: 0.1.0-rc1
-description: "Experimental local project memory with explicit-tool-only recall by default and permission-gated notes."
+version: 0.1.0-rc40
+description: "Experimental authenticated scoped memory and review UI; requires the accompanying pinned Hermes host patch. Production model extraction is disabled."
 author: ELM plugin contributors
 license: Apache-2.0
 kind: standalone

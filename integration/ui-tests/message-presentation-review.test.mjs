@@ -1,0 +1,7 @@
+import {readFileSync} from 'node:fs';import test from 'node:test';import assert from 'node:assert/strict';
+let source=readFileSync(new URL('../../elm/desktop/plugin.js',import.meta.url),'utf8').replace("import * as SDK from '@hermes/plugin-sdk';",'const SDK={TRANSCRIPT_PRESENTATION_AREA:"transcript.presentation"};').replace("import { createElement as h, useLayoutEffect, useState, useSyncExternalStore } from 'react';",'const h=(...args)=>args;');
+const {classifyMessagePresentation:classify,createMessagePresentationPreferences:preferences}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+const p=preferences({storage:{get:()=>({}),set(){}}});p.setEnabled(true);const c=t=>classify({role:'assistant',textPrefix:t,streaming:false},p.getSnapshot());const m='::elm-message{type="final"}';
+test('lazy quote continuation is not an author presentation declaration',()=>{assert.equal(c('> Here is an example\n'+m),null)});
+test('escaped marker and longer fence do not classify',()=>{for(const text of ['\\'+m,'````\n```\n'+m+'\n````','~~~\n'+m+'\n```'])assert.equal(c(text),null)});
+test('stored invalid labels and dimensions cannot expand styles',()=>{for(const label of ['\u202eFinal','x'.repeat(25),'\u0000']){p.setType('final',{label,accent:'red;display:none',border:'url(evil)',background:'image'});const s=c(m);assert.equal(s.label,'Final');assert.equal(s.accent,'theme');assert.equal(s.border,'side');assert.equal(s.background,'subtle')}});

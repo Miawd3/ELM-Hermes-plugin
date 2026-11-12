@@ -2,3 +2,9 @@ ELM Memory
 Copyright 2026 Miawd3 and ELM contributors
 
 This product is licensed under the Apache License, Version 2.0.
+
+This restoration includes an experimental integration patch for
+NousResearch/hermes-agent, pinned at commit
+126980e47b826963b26bf57d210106d849322f8a.
+Upstream copyright and license notices remain applicable to derived portions.
+This project is not an official Hermes release or endorsement.

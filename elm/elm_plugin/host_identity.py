@@ -1,7 +1,7 @@
 """Read-only adapter to host-owned chat and project metadata.
 
 No CWD inference, active-sidebar inference, message parsing or caller grants.
-The adapter is qualified against the host revision named in the release receipt.
+Host qualification is release-specific; symbol presence does not prove compatibility.
 Missing host metadata fails closed. It never creates or migrates a host database.
 """
 from contextlib import closing
@@ -49,10 +49,16 @@ class HostIdentity:
             raise IdentityError('host_metadata_unavailable', 'Cannot read current host workspaces') from exc
 
     def resolve(self, session_id):
-        from hermes_state import SessionDB
-        from hermes_cli import projects_db
-
         session_id = _identifier(session_id)
+        try:
+            from hermes_state import SessionDB
+            from hermes_cli import projects_db
+        except ImportError as exc:
+            raise IdentityError('host_api_unsupported',
+                                'This host lacks the required workspace ownership API') from exc
+        if not callable(getattr(projects_db, 'resolve_session_project', None)):
+            raise IdentityError('host_api_unsupported',
+                                'This host lacks the required workspace ownership API')
         path = self.home / 'state.db'
         if not path.is_file():
             raise IdentityError('session_unavailable', 'This profile has no stored chat to bind')

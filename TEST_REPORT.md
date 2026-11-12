@@ -1,37 +1,29 @@
-# Current test report
+# Restoration qualification · 2026-11-12
 
-## Provenance and environment
+## Fresh checks on this publication candidate
 
-Input source commit: ea694a0c0a6a8b75b47332f0f92bae2087f10e8f. All 188 retrieved input files matched their Git blob hashes before edits. Original source remains separate and unmodified.
+- The complete host patch passed `git apply --check` and applied on a fresh checkout of official Hermes commit `126980e47b826963b26bf57d210106d849322f8a`.
+- **164 portable JavaScript tests passed:** 159 controller/review cases and five whole-message classifier/preferences cases. Reproduce with `bash integration/run-ui-tests.sh`. These use the shipped source with synthetic SDK/React bindings.
+- Python syntax compilation passed for 218 restored plugin and host-overlay Python files. Syntax compilation is not a runtime integration test.
+- The complete recovery Node glob was attempted: 164 passed, four environment/setup failures because host React/esbuild dependencies were absent. The portable runner explicitly excludes host-dependent suites; it is not a disguised full-suite pass.
+- The shipped plugin JavaScript and cumulative patch match the backed-up integrated candidate byte-for-byte (hashes below).
 
-Official Hermes source: https://github.com/NousResearch/hermes-agent/tree/6a0d2d12815c0546b0bcaf05046e2fe3293f60aa . Official source checkout remained clean. Python 3.14.9 and dependencies were prepared through Hermes's managed runtime. Tests used disposable profile and temporary data, without user credentials or live model calls.
+## Preserved earlier integrated evidence, not rerun claims
 
-## Fresh checks
+The recovered checkpoint reports 1,118 native backend/security tests, 127 clean-profile regressions, 177 dynamic JavaScript tests, 16 component SSR suites, four actual native whole-message tests, TypeScript checks and renderer build passing. Counts overlap and must not be summed. That evidence came from the pre-reset qualified environment; this public source update does not claim all of it was rerun here.
 
-- Official validator: all 16 checks pass, exit 0, empty stderr. Security scan says safe. One warning lists 21 private/undocumented core import/call locations. This is not an independent audit or catalog approval.
-- Full current-host root discovery with exact host dependency pins plus tiktoken 0.14.0 and regex 2026.9.29: 338 executions, 264 pass, 73 errors, 1 skip. No existing Hermes dependency version changed. Source is imported directly; only the local hermes-agent distribution metadata is absent from the separate dependency test environment.
-- Error breakdown: 62 missing set_session_project calls in fixtures; 5 missing resolve_session_project runtime calls; 5 retained tests expecting the intentionally disabled plugin updater; 1 test requiring its owned native-mount harness. No tests were removed or newly skipped to conceal failures.
-- Four inherited regression discovery lanes: 356, 158, 150 and 19 executions, all pass. These inherited counts overlap; they must not be summed into a unique-test claim.
-- Focused catalog update/bridge guards: 5 pass.
-- Native human-draft bridge: 16 pass with synthetic completions, not real provider access.
-- Durable record suite: 19 pass.
-- Offline synthetic demo: passes, no Hermes service or model needed.
-- Syntax: 135 Python files and 11 JavaScript files pass.
-- Targeted source secret/path scan: zero findings across 196 text files. Scan covers PEM private-key headers, common credential prefixes and personal home-path patterns. It is not an exhaustive credential audit.
-- Both regenerated source inventories verify exact final file hashes. Bytecode, caches, Git history and dependency runtimes are excluded from the delivery.
+Earlier stock/patched loader probes reported scoped-provider unavailable/zero scoped RPCs on stock and 81 RPCs plus six starter skills on the qualified patched in-process host. A loaded plugin on stock Hermes is not supported installation success.
 
-The earlier host-only root run without optional vocabularies had 82 errors and 15 skips. A separate initial tokenizer environment re-resolved some host dependencies and had 77 errors; it is superseded by the pinned 73-error run above. Those earlier runs are not used as current acceptance evidence.
+## Known failures and gaps
 
-## Workspace compatibility finding
+- A previous publication attempt ran retained historical `test_host_identity`, `test_workspace_api` and `test_product_native_updates` suites against the rebuilt host: **21 failed, seven passed**, involving older ownership/`set_session_project` contracts. Those legacy tests remain historical evidence, not current native qualification. Do not advertise the repository's entire inherited test suite as green.
+- No fresh real Windows/Electron walkthrough, OS installer acceptance, real-provider test, autonomous search-agent test or new answer-quality benchmark has been demonstrated.
+- Production organizer dispatch remains disabled. Live model aliases/request profiles and actual search-agent behavior still require work.
+- No claim of reaching 60% at 700 tokens, reducing actual customer billing, or outperforming other memory systems is made.
 
-The current official projects_db module lacks resolve_session_project and set_session_project. The old upstream commit b200f5bc60e31588ba2cb60e288029c4a54ba5fa named in inherited docs also lacks those named functions. The preserved Hermes 0.23 historical receipt is therefore not evidence that the optional workspace layer works on a clean stock installation.
+## Integrity
 
-Current-host UI workspace listing and session CWD do not encode ELM's earlier explicit/manual binding, explicit Home override or compression-ancestor precedence. A path-based substitute would weaken ownership. No such substitute was made.
+- `elm/desktop/plugin.js`: `210a1ff6b069ca448e8708aa808b38924b7926583e926d0416285205550fd322`
+- `integration/host.patch`: `f15b63d8562cc9b99caca6c61c60bc6756221c464a5f0ef599d4549ac32d00ac`
 
-A separate fail-closed patch detects an absent/noncallable resolver and raises host_api_unsupported. Human routes return HTTP 503. Eight tests pass, including actual current-host refusal, unchanged database bytes, no memory-store creation, unknown-session refusal and retained legacy binding/Home/archive/current-lineage contracts using scoped test doubles. The official validator also passes that variant. It is a safety diagnostic, not functional compatibility.
-
-The visible update-panel wording was reconciled after the full root run to state that plugin updates are disabled. This changes text only; JavaScript syntax and the exact-byte validator were rerun afterward.
-
-## Limits
-
-No fresh full live UI acceptance, model tool-selection success, answer-quality gain, semantic DLP, encryption guarantee, complete erasure, guaranteed monetary cap, independent security certification or production readiness is claimed. The screenshots/browser results, if supplied separately, must be evaluated in their own stated test context.
+`python elm/verify_release.py` checks the packaged plugin inventory. A checksum proves identity, not safety, compatibility or a signature. No paid APIs, real credentials or live user profiles were used for this publication qualification.

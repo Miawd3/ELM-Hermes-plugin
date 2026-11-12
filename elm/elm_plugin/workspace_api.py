@@ -34,7 +34,7 @@ def failure(exc):
                   'revision_conflict','stale_preview','privacy_broadening_denied','unowned_root'}:
         status = 409
     elif code in {'storage_error','corrupt_store','settings_unavailable','host_metadata_unavailable',
-                  'index_build_failed','index_validation_failed','corrupt_index'}:
+                  'index_build_failed','index_validation_failed','corrupt_index','host_api_unsupported'}:
         status = 503
     else:
         status = 400

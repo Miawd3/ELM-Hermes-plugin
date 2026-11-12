@@ -1,1947 +1,1430 @@
-import * as SDK from "@hermes/plugin-sdk";
-import {
-  createElement as h,
-  useId,
-  useLayoutEffect,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import * as SDK from '@hermes/plugin-sdk';
+import { createElement as h, useLayoutEffect, useState, useSyncExternalStore } from 'react';
 
-const value = (atom) => atom?.get?.();
-function validRecord(r) {
-  return (
-    r &&
-    ["id", "scope_id", "title", "text", "topic"].every(
-      (key) => typeof r[key] === "string",
-    ) &&
-    Number.isSafeInteger(r.revision) && r.revision > 0 &&
-    ["user", "work", "reference"].includes(r.domain) &&
-    [
-      "explicit_fact",
-      "preference",
-      "observation",
-      "interpretation",
-      "summary",
-      "procedure",
-      "reference",
-    ].includes(r.kind) &&
-    [
-      "explicit_statement",
-      "direct_observation",
-      "source_document",
-      "inference",
-    ].includes(r.basis) &&
-    ["pending", "approved", "invalidated"].includes(r.state) &&
-    Array.isArray(r.dependencies) &&
-    r.dependencies.every((pin) => pin && typeof pin === "object" && !Array.isArray(pin) &&
-      Object.keys(pin).length === 2 && typeof pin.id === "string" && pin.id.length > 0 &&
-      Number.isSafeInteger(pin.revision) && pin.revision > 0) &&
-    new Set(r.dependencies.map((pin) => pin.id)).size === r.dependencies.length &&
-    Array.isArray(r.sources) &&
-    r.sources.length > 0 &&
-    r.sources.every(
-      (s) =>
-        s &&
-        typeof s.ref === "string" &&
-        s.ref.length > 0 &&
-        (s.quote == null || typeof s.quote === "string") &&
-        (s.sha256 == null || typeof s.sha256 === "string"),
-    )
-  );
+const read = atom => atom?.get?.();
+const states = ['all', 'pending', 'approved', 'invalidated'];
+export const manualSourceAllowed = (reference, project) => !project || typeof reference === 'string' && !reference.trimStart().startsWith('elm-snapshot-v1:');
+export function reviewIdentity(host, epoch) {
+  const s = host?.state || {}, owner = read(s.focusedSessionOwner);
+  const session = read(s.focusedSessionId), stored = read(s.focusedStoredSessionId);
+  const profile = read(s.focusedSessionProfile), connection = read(s.connectionId);
+  const ambient = read(s.profile), gateway = read(s.gateway);
+  const key = JSON.stringify([session, stored, profile, connection, ambient, gateway, owner, epoch()]);
+  const error = !session || !stored ? 'Focus an existing saved chat, then refresh.'
+    : !owner || !profile || !connection || !ambient ? 'Focused chat ownership is unavailable.'
+    : owner.profile !== profile || owner.connectionId !== connection || profile !== ambient
+      ? 'Select this chat’s owning profile and connection before reviewing memory.'
+    : gateway !== 'open' ? 'Reconnect the gateway, then refresh.'
+    : typeof host?.request !== 'function' ? 'This host does not support authenticated memory requests.' : '';
+  return { key, session, error };
 }
+const exactKeys=(value,keys)=>value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===keys.length&&Object.keys(value).every(k=>keys.includes(k));
+export function validOrganizerPreview(p,ids,requested=512){
+  const hash=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
+  if(!exactKeys(p,['preview_token','job_id','recipient','source_pins','max_output_tokens','max_payload_bytes','cost_notice','egress_payload','payload_sha256','expires_in_seconds','production_dispatch_supported','notice','budget'])||typeof p.preview_token!=='string'||!/^[-_A-Za-z0-9]{43}$/.test(p.preview_token)||typeof p.job_id!=='string'||!/^job_[a-f0-9]{32}$/.test(p.job_id)||p.expires_in_seconds!==300||typeof p.production_dispatch_supported!=='boolean'||p.max_output_tokens!==requested||!Number.isInteger(requested)||requested<1||requested>512||p.max_payload_bytes!==32768||!hash(p.payload_sha256)||typeof p.notice!=='string'||p.notice.length>2048||typeof p.cost_notice!=='string'||p.cost_notice.length>2048)return false;
+  const r=p.recipient;
+  if(!exactKeys(r,['provider','endpoint','credential_mode','credential_slot','credential_version','route_sha256','redirects','automatic_retries','fallback','environment_proxy'])||typeof r.provider!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(r.provider)||r.credential_mode!=='host-enrolled-slot'||r.credential_slot!=='organizer'||!Number.isSafeInteger(r.credential_version)||r.credential_version<1||!hash(r.route_sha256)||r.redirects!==false||r.automatic_retries!==0||r.fallback!==false||r.environment_proxy!==false)return false;
+  try{const url=new URL(r.endpoint);if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash||url.pathname!=='/v1/chat/completions'||r.endpoint.length>256)return false}catch{return false}
+  if(!Array.isArray(p.source_pins)||p.source_pins.length!==ids.length||new Set(p.source_pins.map(s=>s?.source_id)).size!==ids.length||!p.source_pins.every(s=>exactKeys(s,['source_id','sha256','revision','sensitive','state'])&&ids.includes(s.source_id)&&hash(s.sha256)&&Number.isSafeInteger(s.revision)&&s.revision>0&&typeof s.sensitive==='boolean'&&s.state==='active'))return false;
+  const limits=p.budget;
+  if(!exactKeys(limits,['outbound_body_bytes','outbound_body_bytes_limit','response_body_bytes_limit','requested_max_output_tokens','input_token_count','monetary_limit','pricing_verified','timeout_seconds','absolute_deadline'])||!Number.isSafeInteger(limits.outbound_body_bytes)||limits.outbound_body_bytes<1||limits.outbound_body_bytes>32768||limits.outbound_body_bytes_limit!==32768||limits.response_body_bytes_limit!==8192||limits.requested_max_output_tokens!==requested||limits.input_token_count!==null||limits.monetary_limit!==null||limits.pricing_verified!==false||limits.timeout_seconds!==10||limits.absolute_deadline!==false)return false;
+  const b=p.egress_payload;
+  return exactKeys(b,['model','messages','temperature','max_tokens'])&&typeof b.model==='string'&&b.model.length>0&&b.model.length<=128&&b.temperature===0&&b.max_tokens===requested&&Array.isArray(b.messages)&&b.messages.length>=1&&b.messages.length<=8&&b.messages.every(m=>exactKeys(m,['role','content'])&&['system','user','assistant'].includes(m.role)&&typeof m.content==='string')&&new TextEncoder().encode(JSON.stringify(b)).length<=32768;
+}
+const blank = (key, error = '') => ({ ownerKey: key, error, busy: false, notice: '', ready: false,
+  initialized: null, records: [], trash: [], selected: null, preview: null, action: null,
+  filter: 'all', next: null, trashNext: null, uncertain: false, projectStatus: null, binding: null, projectKey: null, listConsent: null, trashConsent: null, sources: [], sourceNext: null, selectedSource: null, lastSource: null, recallSettings: null, captureSettings: null, capturedTurns: [], captureNext: null, curationStatus: null, curationPreview: null, organizerPreview: null, curationJobs: [], curationJobsNext: null, selectedJob: null, acceptedProposal: null, importReceipts: [], importNext: null, selectedImport: null, folderStatus: null });
+const projectKey = (binding, status) => JSON.stringify([binding?.selected_project_id, binding?.project_binding_revision, status?.consent_revision, status?.consent_granted, status?.project_read_authorized, status?.consent_version, status?.context_key]);
+const matchingBinding = (binding, status) => binding?.selected_project_id === status?.selected_project_id && binding?.project_binding_revision === status?.project_binding_revision && typeof status?.context_key === 'string' && !!status.context_key;
 
-// Receipt comparison is deliberately separate from HTTP/overview availability.
-const same = (a, b) => {
-  if (Object.is(a, b)) return true;
-  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-  const keys = Object.keys(a);
-  return keys.length === Object.keys(b).length &&
-    keys.every((key) => Object.hasOwn(b, key) && same(a[key], b[key]));
-};
-const contains = (actual, expected) => actual && expected &&
-  Object.keys(expected).every((key) => same(actual[key], expected[key]));
-const sameIds = (a, b) => Array.isArray(a) && Array.isArray(b) &&
-  a.every((id) => typeof id === "string") &&
-  new Set(a).size === a.length && same([...a].sort(), [...b].sort());
-const validGrant = (g) => g &&
-  ["source_scope", "target_scope", "record_id"].every((k) => typeof g[k] === "string" && g[k]) &&
-  Number.isInteger(g.record_revision) && g.record_revision > 0;
-function draftTypeMatches(result, requestedKind) {
-  const storedKind = requestedKind === "observation" ? "interpretation" : requestedKind;
-  if (!["summary", "observation", "procedure"].includes(requestedKind) ||
-      result.kind !== storedKind || result.basis !== "inference") return false;
-  const receipt = result.generation_receipt;
-  if (!receipt) return requestedKind !== "observation";
-  return receipt.schema === 1 && receipt.requested_kind === requestedKind &&
-    receipt.stored_kind === storedKind && receipt.basis === result.basis &&
-    receipt.record_id === result.id && receipt.record_revision === result.revision;
-}
-function confirmEffect(path, method, body, result, before, after, record) {
-  if (!result || typeof result !== "object") return "The write result metadata is missing.";
-
-  if (path === "/record" || path === "/draft" ||
-      (record && (method === "PATCH" || path.endsWith("/approve")))) {
-    if (!validRecord(result) || result.revision < 1)
-      return "The full returned record identity, revision or state is missing.";
-    const expected = path === "/record" ? body : method === "PATCH" ? body.changes : {};
-    if (!contains(result, expected) || result.scope_id !== before.selected_scope_id ||
-        (record && (result.id !== record.id || result.revision <= record.revision)) ||
-        (!record && before.records.some((r) => r.id === result.id)) ||
-        (path.endsWith("/approve") && result.state !== "approved") ||
-        (path === "/draft" && (!draftTypeMatches(result, body.kind) || result.state !== "pending" ||
-          !sameIds(result.dependencies.map((pin) => pin.id), body.record_ids) ||
-          result.dependencies.some((pin) => pin.revision !== before.records.find((r) => r.id === pin.id)?.revision))))
-      return "The returned record contradicts the requested change.";
-    const observed = after.records.find((r) => r.id === result.id);
-    const fields = ["id", "revision", "scope_id", "title", "text", "domain", "kind", "basis", "topic", "sources", "state", "dependencies", "sensitive", "created_at", "updated_at"];
-    if (!observed || fields.some((k) => Object.hasOwn(result, k) && !same(result[k], observed[k])))
-      return "The exact returned record was not found in the fresh overview.";
-    return "";
-  }
-  if (path.endsWith("/delete") && record) {
-    if (!Array.isArray(result.deleted_ids) || !result.deleted_ids.includes(record.id) ||
-        !result.deleted_ids.every((id) => typeof id === "string"))
-      return "The deleted record identifiers are missing or contradictory.";
-    return after.records.some((r) => result.deleted_ids.includes(r.id)) ||
-      after.grants?.some((g) => result.deleted_ids.includes(g.record_id))
-      ? "A deleted record or its active share is still present in the fresh overview." : "";
-  }
-  if (path === "/grants") {
-    if (result.source_scope !== body.source_scope || result.target_scope !== body.target_scope ||
-        !sameIds(result.record_ids, body.record_ids) || !Number.isInteger(result.revision) ||
-        !Number.isInteger(after.revision) || after.revision < result.revision)
-      return "The sharing receipt does not identify the requested records and areas.";
-    if (!Array.isArray(after.grants))
-      return "Active grants are not listed by this API; sharing cannot be independently confirmed.";
-    const matches = (id) => after.grants.filter((g) => g.source_scope === body.source_scope &&
-      g.target_scope === body.target_scope && g.record_id === id);
-    return body.record_ids.every((id) => method === "DELETE"
-      ? matches(id).length === 0
-      : matches(id).length === 1 && matches(id)[0].record_revision ===
-        before.records.find((r) => r.id === id)?.revision)
-      ? "" : "The active grant inventory contradicts the requested sharing change.";
-  }
-  if (path === "/learning")
-    return typeof result.learning_enabled === "boolean" && result.learning_enabled === body.enabled &&
-      after.status?.learning_enabled === result.learning_enabled
-      ? "" : "Draft-generation settings are missing or do not match the requested value.";
-  if (path === "/scopes/privacy") {
-    const observed = after.scopes.find((s) => s.id === body.scope_id);
-    return result.id === body.scope_id && result.private === body.private &&
-      ["id", "kind", "label", "private"].every((k) => Object.hasOwn(result, k) && same(result[k], observed?.[k]))
-      ? "" : "The returned area privacy does not match the requested value and fresh overview.";
-  }
-  if (path === "/setup")
-    return result.initialized === true && after.setup === true
-      ? "" : "Fresh-store initialization was not confirmed by its result and overview.";
-  if (path === "/index/rebuild")
-    return body.scope_id === before.selected_scope_id && result.scope_id === body.scope_id &&
-      after.selected_scope_id === body.scope_id && after.status?.scope_id === body.scope_id &&
-      result.generation != null && after.status?.generation === result.generation &&
-      result.index_state === "ready" && after.status?.index_state === "ready"
-      ? "" : "The index generation and ready state cannot be independently confirmed.";
-  return "This operation has no exact readback contract.";
-}
-function cleanupWarning(result) {
-  const cleanup = result?.index_cleanup;
-  const held = cleanup?.held_paths;
-  const incomplete = cleanup?.complete === false || (Array.isArray(held) && held.length > 0);
-  return [typeof result?.warning === "string" ? result.warning : "",
-    incomplete ? `Derived-index cleanup is incomplete${Array.isArray(held) && held.length ? `; held paths: ${held.join(", ")}` : ""}. The record change may already be committed; do not repeat the mutation to retry cleanup.` : ""]
-    .filter(Boolean).join(" ");
-}
-
-// ctx.rest is ambient-only on this SDK: it accepts no profile or connection pin.
-// Never substitute requestProfile (RPC) for the authenticated plugin REST door.
-export function createMemoryController(ctx, host = SDK.host) {
-  let disposed = false,
-    generation = 0,
-    selection = "",
-    identityKey = "";
-  let snapshot = {
-    data: null,
-    phase: "idle",
-    error: "",
-    notice: "",
-    pending: false,
-    unconfirmed: false,
-    generation: 0,
-  };
-  const listeners = new Set();
-  const publish = (change) => {
-    snapshot = { ...snapshot, ...change };
-    for (const fn of listeners) fn();
-  };
-  function identity() {
-    const s = host?.state || {};
-    const session = value(s.focusedStoredSessionId);
-    const profile = value(s.focusedSessionProfile);
-    const owner = value(s.focusedSessionOwner);
-    const connection = value(s.connectionId);
-    const ambient = value(s.profile);
-    const gateway = value(s.gateway);
-    const epoch =
-      typeof SDK.gatewayActivationEpoch === "function"
-        ? SDK.gatewayActivationEpoch()
-        : null;
-    const key = JSON.stringify([
-      session,
-      profile,
-      owner,
-      connection,
-      ambient,
-      gateway,
-      epoch,
-    ]);
-    let error = "";
-    if (!session) error = "Focus a saved chat to inspect its memory boundary.";
-    else if (!owner?.connectionId || !profile || !connection || !ambient)
-      error =
-        "The focused chat owner is unavailable. Update Hermes Desktop or resolve the chat owner.";
-    else if (
-      owner.profile !== profile ||
-      profile !== ambient ||
-      owner.connectionId !== connection
-    )
-      error =
-        "This chat belongs to another profile or connection. Plugin REST cannot safely route there; select its owning gateway first.";
-    else if (gateway !== "open")
-      error = "The gateway is unavailable. Reconnect, then refresh memory.";
-    return { session, key, error };
-  }
+/** Ephemeral UI state only. The host, never a caller-supplied scope, authorizes each request. */
+export function createReviewController(host, epoch = () => 0, lane = 'private') {
+  if (!['private', 'project'].includes(lane)) throw new Error('Unsupported review lane');
+  let identity = reviewIdentity(host, epoch), state = blank(identity.key, identity.error);
+  let generation = 0, disposed = false;
+  const listeners = new Set(), subscriptions = [];
+  const publish = patch => { state = { ...state, ...patch }; for (const fn of listeners) fn(); };
   function sync() {
-    const current = identity();
-    if (current.key !== identityKey) {
-      identityKey = current.key;
-      generation++;
-      selection = "";
-      publish({
-        data: null,
-        phase: current.error ? "unavailable" : "idle",
-        error: current.error,
-        notice: "",
-        pending: false,
-        stale: false,
-        unconfirmed: false,
-        ownerKey: identityKey,
-        generation,
-      });
+    const next = reviewIdentity(host, epoch);
+    if (next.key !== identity.key) {
+      identity = next; generation++; state = blank(next.key, next.error);
+      for (const fn of listeners) fn();
     }
-    return current;
+    return next;
   }
-  async function refresh(scope = selection, retainSameArea = true, requireSetup = false) {
+  for (const atom of Object.values(host?.state || {})) {
+    if (typeof atom?.subscribe === 'function') subscriptions.push(atom.subscribe(sync));
+  }
+  async function operation(fn, mutation = false, guard = true, readError = null) {
     const current = sync();
-    if (disposed || current.error) return false;
-    const retained =
-      retainSameArea &&
-      snapshot.data?.setup &&
-      (!scope || scope === snapshot.data.selected_scope_id)
-        ? snapshot.data
-        : null;
-    selection = scope || "";
-    const token = ++generation,
-      key = current.key;
-    publish({
-      data: retained,
-      stale: Boolean(retained),
-      phase: retained ? "refreshing" : "loading",
-      error: "",
-      notice: "",
-      generation,
-    });
-    try {
-      const query = new URLSearchParams({ session_id: current.session });
-      if (selection) query.set("scope_id", selection);
-      const data = await ctx.rest(`/overview?${query}`, { timeoutMs: 20000 });
-      if (disposed || token !== generation || identity().key !== key)
-        return false;
-      if (
-        data?.schema !== 1 ||
-        typeof data.setup !== "boolean" ||
-        (requireSetup && data.setup !== true) ||
-        !Array.isArray(data.scopes) ||
-        !Array.isArray(data.records) ||
-        data.context?.session_id !== current.session ||
-        (selection && data.selected_scope_id !== selection)
-      )
-        throw new Error(
-          "Memory overview is unavailable or has an incompatible scope/schema. Nothing from another chat was loaded.",
-        );
-      if (
-        !data.scopes.every(
-          (s) =>
-            s &&
-            typeof s.id === "string" &&
-            typeof s.label === "string" &&
-            ["personal", "workspace", "chat"].includes(s.kind) &&
-            typeof s.private === "boolean",
-        ) ||
-        !data.records.every(validRecord) ||
-        (data.grants !== undefined && (!Array.isArray(data.grants) || !data.grants.every(validGrant)))
-      )
-        throw new Error(
-          "Memory returned malformed areas or records. Refresh after the backend is corrected.",
-        );
-      if (
-        data.setup &&
-        !data.scopes.some((s) => s.id === data.selected_scope_id)
-      )
-        throw new Error("The selected memory area is unavailable.");
-      publish({
-        data,
-        stale: false,
-        phase: data.setup ? "ready" : "unconfigured",
-        unconfirmed: false,
-        error: "",
-      });
-      return true;
-    } catch (e) {
-      if (!disposed && token === generation && identity().key === key)
-        publish({
-          data: retained,
-          stale: Boolean(retained),
-          phase: "error",
-          error: e?.message || "Memory could not be loaded.",
-        });
-      return false;
-    }
-  }
-  function creationContext() {
-    sync();
-    return { ownerKey: identityKey, generation, scope_id: snapshot.data?.selected_scope_id };
-  }
-  async function createRecord(changes, destination, pin) {
-    sync();
-    const data = snapshot.data;
-    const chat = privateCreationScope(data);
-    if (!pin || pin.ownerKey !== identityKey || pin.generation !== generation ||
-        pin.scope_id !== data?.selected_scope_id ||
-        !["current-area", "private-chat"].includes(destination) ||
-        (destination === "private-chat" && !chat)) {
-      publish({ error: "The creation destination is stale or the current chat is not private. Refresh and review before saving.", notice: "" });
-      return false;
-    }
-    const scope_id = destination === "private-chat" ? chat.id : data.selected_scope_id;
-    return action("/record", "POST", { ...changes, scope_id, state: "pending" }, "Saved", { pin, scope_id });
-  }
-  async function action(path, method, body, label = "Saved", creation = null) {
-    const current = sync();
-    if (
-      disposed ||
-      current.error ||
-      snapshot.pending ||
-      !snapshot.data ||
-      snapshot.unconfirmed ||
-      !["ready", "unconfigured"].includes(snapshot.phase)
-    )
-      return false;
-    const before = snapshot.data;
-    const selected = before.selected_scope_id;
-    const recordMatch = path.match(/^\/records\/([^/]+)/);
-    const record = recordMatch
-      ? snapshot.data.records.find(
-          (r) => r.id === decodeURIComponent(recordMatch[1]),
-        )
-      : null;
-    if (
-      (body.scope_id && body.scope_id !== selected && !(path === "/record" && method === "POST" &&
-        creation?.scope_id === body.scope_id && creation.pin.ownerKey === current.key &&
-        creation.pin.generation === generation && creation.pin.scope_id === selected &&
-        privateCreationScope(before)?.id === body.scope_id)) ||
-      (body.source_scope && body.source_scope !== selected) ||
-      (recordMatch &&
-        (!record ||
-          (body.expected_revision != null &&
-            record.revision !== body.expected_revision)))
-    ) {
-      publish({
-        error:
-          "The memory area changed or this record is stale. Refresh and review before saving.",
-        notice: "",
-      });
-      return false;
-    }
-    const token = generation,
-      key = current.key;
-    publish({ pending: true, error: "", notice: "Saving…" });
-    try {
-      const receipt = await ctx.rest(path, { method, body, timeoutMs: 60000 });
-      if (disposed || token !== generation || identity().key !== key)
-        return false;
-      if (receipt?.ok !== true)
-        throw new Error(receipt?.message || "The write was not acknowledged.");
-      const verificationGeneration = generation + 1;
-      const refreshed = await refresh(selection, !path.endsWith("/delete"), true);
-      if (
-        disposed ||
-        generation !== verificationGeneration ||
-        identity().key !== key
-      )
-        return false;
-      let observed = snapshot.data;
-      if (refreshed && creation && body.scope_id !== selected) {
-        const query = new URLSearchParams({ session_id: current.session, scope_id: body.scope_id });
-        try {
-          observed = await ctx.rest(`/overview?${query}`, { timeoutMs: 20000 });
-          if (observed?.schema !== 1 || observed.setup !== true ||
-              observed.context?.session_id !== current.session || observed.selected_scope_id !== body.scope_id ||
-              privateCreationScope(observed)?.id !== body.scope_id ||
-              !Array.isArray(observed.records) || !observed.records.every(validRecord)) observed = null;
-        } catch { observed = null; }
-        if (disposed || generation !== verificationGeneration || identity().key !== key) return false;
-      }
-      const reason = refreshed && observed
-        ? confirmEffect(path, method, body, receipt.result,
-            creation ? { ...before, selected_scope_id: body.scope_id } : before, observed, record)
-        : "The fresh overview could not be verified.";
-      const verified = !reason;
-      const warning = cleanupWarning(receipt.result);
-      publish({
-        pending: false,
-        unconfirmed: !verified,
-        notice: [verified
-          ? warning ? `${label}: record/settings effect verified in memory; cleanup is not fully verified.`
-            : `${label} and verified in memory.`
-          : `Write acknowledged; effect unconfirmed. ${reason} Your draft is retained. Refresh to reconcile before trying again; nothing is retried automatically.`,
-          warning].filter(Boolean).join(" "),
-      });
-      return verified;
-    } catch (e) {
-      if (!disposed && token === generation && identity().key === key)
-        publish({
-          pending: false,
-          error: e?.message || "The write failed. Your draft is still here.",
-          notice:
-            "Save failed or is unconfirmed. Your draft is unchanged. Refresh to reconcile a timeout before retrying; nothing is retried automatically.",
-        });
-      return false;
-    }
-  }
-  async function deletionPreview(record) {
-    const current = sync();
-    if (
-      disposed ||
-      current.error ||
-      snapshot.pending ||
-      snapshot.phase !== "ready"
-    )
-      return null;
-    const token = generation,
-      key = current.key;
-    publish({ pending: true, error: "", notice: "Loading deletion preview…" });
-    try {
-      const receipt = await ctx.rest(
-        `/records/${encodeURIComponent(record.id)}/delete-preview`,
-        { method: "POST", body: {}, timeoutMs: 20000 },
-      );
-      if (disposed || token !== generation || identity().key !== key)
-        return null;
-      const preview = receipt?.result;
-      if (
-        !receipt.ok ||
-        preview?.record_id !== record.id ||
-        !Number.isSafeInteger(preview.revision) ||
-        preview.revision !== snapshot.data?.revision ||
-        !preview.preview_token ||
-        !Array.isArray(preview.dependent_ids)
-      )
-        throw new Error(
-          "The deletion preview is stale or invalid. Refresh before deleting.",
-        );
-      publish({
-        pending: false,
-        notice: "Review the deletion below. Nothing has been deleted.",
-      });
-      return preview;
-    } catch (e) {
-      if (!disposed && token === generation && identity().key === key)
-        publish({
-          pending: false,
-          error: e?.message || "Deletion preview failed.",
-          notice: "",
-        });
-      return null;
-    }
-  }
-  function reconcile() {
-    const old = identityKey;
-    sync();
-    if (identityKey !== old) void refresh();
-  }
-  const state = host?.state || {};
-  const unlisten = [
-    "focusedStoredSessionId",
-    "focusedSessionProfile",
-    "focusedSessionOwner",
-    "profile",
-    "connectionId",
-    "gateway",
-  ]
-    .map((key) => state[key])
-    .filter((a) => typeof a?.listen === "function")
-    .map((a) => a.listen(reconcile));
-  sync();
-  return {
-    getSnapshot: () => snapshot,
-    subscribe(fn) {
-      listeners.add(fn);
-      return () => listeners.delete(fn);
-    },
-    refresh,
-    // Only createRecord may supply the internal cross-area creation pin.
-    action: (path, method, body, label) => action(path, method, body, label),
-    creationContext,
-    createRecord,
-    deletionPreview,
-    reconcile,
-    dispose() {
-      disposed = true;
-      generation++;
-      for (const fn of unlisten) fn();
-      listeners.clear();
-    },
-  };
-}
-
-const row = {
-  display: "flex",
-  flexWrap: "wrap",
-  alignItems: "center",
-  gap: "0.6rem",
-};
-const section = { display: "grid", gap: "0.8rem", marginBlock: "1.5rem" };
-const muted = { color: "var(--ui-text-secondary)" };
-const plain = (text) => String(text ?? "").replaceAll("_", " ");
-const Button = SDK.Button || "button";
-const Input = SDK.Input || "input";
-const Textarea = SDK.Textarea || "textarea";
-const button = (text, onClick, disabled = false, extra = {}) =>
-  h(
-    Button,
-    {
-      type: "button",
-      variant: "secondary",
-      size: "sm",
-      disabled,
-      onClick,
-      style: { justifySelf: "start", maxWidth: "100%", whiteSpace: "normal" },
-      ...extra,
-    },
-    text,
-  );
-function Field({ label, children }) {
-  const id = useId();
-  return h(
-    "div",
-    { style: { display: "grid", gap: "0.35rem", minWidth: 0 } },
-    h("label", { htmlFor: id }, label),
-    children(id),
-  );
-}
-function TextField({ label, value, onChange, multiline = false, ...props }) {
-  return h(Field, { label }, (id) =>
-    h(multiline ? Textarea : Input, {
-      id,
-      "aria-label": label,
-      value,
-      onChange: (e) => onChange(e.target.value),
-      ...props,
-    }),
-  );
-}
-function Choice({ label, value, options, onChange, disabled = false }) {
-  return h(Field, { label }, (id) =>
-    h(
-      "select",
-      {
-        id,
-        "aria-label": label,
-        value,
-        disabled,
-        onChange: (e) => onChange(e.target.value),
-        style: {
-          font: "inherit",
-          color: "var(--ui-text-primary)",
-          background: "var(--ui-bg-secondary)",
-          border: "1px solid var(--ui-stroke-secondary)",
-          padding: "0.35rem",
-          maxWidth: "100%",
-        },
-      },
-      options.map((o) =>
-        h(
-          "option",
-          { key: o.value ?? o, value: o.value ?? o },
-          o.label ?? plain(o),
-        ),
-      ),
-    ),
-  );
-}
-const domains = ["user", "work", "reference"];
-const kinds = [
-  "explicit_fact",
-  "preference",
-  "observation",
-  "interpretation",
-  "summary",
-  "procedure",
-  "reference",
-];
-const bases = [
-  "explicit_statement",
-  "direct_observation",
-  "source_document",
-  "inference",
-];
-function privateCreationScope(data) {
-  if (data?.context?.private !== true || !Array.isArray(data.scopes)) return null;
-  const matches = data.scopes.filter((s) => s.id === data.context.chat_scope_id && s.kind === "chat" && s.private === true);
-  return matches.length === 1 ? matches[0] : null;
-}
-function RecordForm({ record, scope, data, controller, pending, onClose }) {
-  const [creationPin] = useState(() => controller.creationContext());
-  const [destination, setDestination] = useState("current-area");
-  const privateChat = privateCreationScope(data);
-  const target = destination === "private-chat" ? privateChat : scope;
-  const [draft, setDraft] = useState(() => ({
-    title: record?.title || "",
-    text: record?.text || "",
-    domain: record?.domain || (scope.kind === "personal" ? "user" : "work"),
-    kind: record?.kind || "explicit_fact",
-    basis: record?.basis || "explicit_statement",
-    topic: record?.topic || "facts",
-    ref: "",
-    quote: "",
-    sources: record?.sources || [],
-  }));
-  const [error, setError] = useState("");
-  const set = (key) => (next) => setDraft((d) => ({ ...d, [key]: next }));
-  async function submit(e) {
-    e.preventDefault();
-    const sources = [
-      ...draft.sources,
-      ...(draft.ref.trim()
-        ? [{ ref: draft.ref, ...(draft.quote ? { quote: draft.quote } : {}) }]
-        : []),
-    ];
-    if (!draft.title.trim() || !draft.text.trim() || !sources.length) {
-      setError(
-        "Add a title, record text, and at least one exact source reference.",
-      );
-      return;
-    }
-    setError("");
-    const changes = {
-      title: draft.title,
-      text: draft.text,
-      domain: draft.domain,
-      kind: draft.kind,
-      basis: draft.basis,
-      topic: draft.topic,
-      sources,
+    if (disposed || state.busy || current.error || (mutation && state.uncertain)) return;
+    const stamp = ++generation, socket = host.getGateway?.(), expectedProject = state.projectKey, expectedConsent = state.projectStatus?.consent_revision, expectedContext = state.projectStatus?.context_key;
+    const valid = () => !disposed && sync().key === current.key && generation === stamp &&
+      (!host.getGateway || host.getGateway() === socket);
+    const rpc = async (method, params = {}) => {
+      if (!valid()) throw new Error('context changed');
+      const reply = await host.request('plugin.elm.' + ((method.startsWith('workspace.') || method.startsWith('chat_folders.')) ? method : lane + '.' + method), { ...params, session_id: current.session });
+      if (!valid()) throw new Error('context changed');
+      if (lane === 'project' && guard && ['list', 'get', 'trash', 'delete_preview'].includes(method) && (reply.consent_revision !== expectedConsent || reply.context_key !== expectedContext)) throw new Error('Consent changed during read');
+      return reply;
     };
-    const ok = record
-      ? await controller.action(
-          `/records/${encodeURIComponent(record.id)}`,
-          "PATCH",
-          { expected_revision: record.revision, changes },
-        )
-      : await controller.createRecord(changes, destination, creationPin);
-    if (ok) onClose();
-    else {
-      const state = controller.getSnapshot();
-      setError(
-        `${state.error || state.notice || "Save could not be confirmed."} Your entered draft is retained.`,
-      );
-    }
-  }
-  return h(
-    "form",
-    {
-      onSubmit: submit,
-      style: section,
-      "aria-label": record ? "Correct record" : "Add record",
-    },
-    h("h3", null, record ? "Correct this record" : "Add a new record"),
-    h(
-      "p",
-      { style: muted },
-      record
-        ? "A correction to an approved record stays approved. Dependent drafts may become invalidated."
-        : "Visibility follows the destination below. Approval is separate: new records start pending, not approved for recall. Saving changes no area privacy and grants no sharing or recall access.",
-    ),
-    h(
-      "fieldset",
-      {
-        disabled: pending,
-        style: {
-          display: "grid",
-          gap: "0.75rem",
-          minWidth: 0,
-          border: 0,
-          padding: 0,
-          margin: 0,
-        },
-      },
-      !record && h(Choice, {
-        label: "New record destination",
-        value: destination,
-        onChange: setDestination,
-        options: [
-          { value: "current-area", label: `Current area: ${scope.label} · ${scope.private ? "Private" : "Scoped"} (${scope.id})` },
-          ...(privateChat && privateChat.id !== scope.id ? [{ value: "private-chat", label: `Current private chat: ${privateChat.label} (${privateChat.id})` }] : []),
-        ],
-      }),
-      !record && h("p", { style: muted }, target
-        ? `Destination: ${target.label} (${target.id}) · ${target.private ? "Private" : "Scoped"}. Private is a recall boundary, not encryption.`
-        : "The private-chat destination is unavailable. Choose the current area or refresh and review."),
-      h(TextField, {
-        label: "Title",
-        value: draft.title,
-        onChange: set("title"),
-        maxLength: 300,
-        required: true,
-      }),
-      h(TextField, {
-        label: "Record text",
-        value: draft.text,
-        onChange: set("text"),
-        multiline: true,
-        rows: 4,
-        required: true,
-        spellCheck: true,
-      }),
-      h(
-        "div",
-        { style: row },
-        h(Choice, {
-          label: "Domain",
-          value: draft.domain,
-          options: domains,
-          onChange: set("domain"),
-        }),
-        h(Choice, {
-          label: "Record kind",
-          value: draft.kind,
-          options: kinds,
-          onChange: set("kind"),
-        }),
-        h(Choice, {
-          label: "Evidence basis",
-          value: draft.basis,
-          options: bases,
-          onChange: set("basis"),
-        }),
-      ),
-      h(TextField, {
-        label: "Topic",
-        value: draft.topic,
-        onChange: set("topic"),
-        required: true,
-      }),
-      draft.sources.length > 0 &&
-        h(
-          "div",
-          { style: { display: "grid", gap: "0.75rem" } },
-          h(
-            "p",
-            { style: muted },
-            "Existing exact sources are retained unless you remove them. Add a replacement below if a source was wrong.",
-          ),
-          draft.sources.map((source, index) =>
-            h(
-              "div",
-              { key: index, style: row },
-              h("code", { style: { overflowWrap: "anywhere" } }, source.ref),
-              button(
-                `Remove source ${index + 1}`,
-                () =>
-                  setDraft((d) => ({
-                    ...d,
-                    sources: d.sources.filter((_, i) => i !== index),
-                  })),
-                pending,
-              ),
-            ),
-          ),
-        ),
-      h(TextField, {
-        label: "Exact source reference",
-        value: draft.ref,
-        onChange: set("ref"),
-        placeholder: "A document section or saved message reference",
-      }),
-      h(TextField, {
-        label: "Exact quote (optional)",
-        value: draft.quote,
-        onChange: set("quote"),
-        multiline: true,
-        rows: 2,
-      }),
-      error && h("p", { role: "alert" }, error),
-      h(
-        "div",
-        { style: row },
-        h(
-          Button,
-          { type: "submit", size: "sm", disabled: pending },
-          record ? "Save correction" : "Save pending record",
-        ),
-        button("Cancel", onClose, pending),
-      ),
-    ),
-  );
-}
-export function isCommunicationCard(record) {
-  return (
-    record.state === "approved" &&
-    record.sensitive === false &&
-    record.domain === "user" &&
-    record.kind === "preference" &&
-    record.topic === "communication" &&
-    record.basis === "explicit_statement"
-  );
-}
-export function shareTargets(record, source, scopes) {
-  if (
-    record.state !== "approved" ||
-    (source.kind !== "personal" && source.private) ||
-    (source.kind === "personal" && !isCommunicationCard(record))
-  )
-    return [];
-  return scopes.filter(
-    (target) =>
-      target.id !== source.id &&
-      (!target.private || isCommunicationCard(record)),
-  );
-}
-function Sharing({ record, scope, scopes, grants, controller, pending }) {
-  const [target, setTarget] = useState("");
-  const targets = shareTargets(record, scope, scopes);
-  const payload = {
-    source_scope: scope.id,
-    target_scope: target,
-    record_ids: [record.id],
-  };
-  return h(
-    "section",
-    { style: section, "aria-label": "Record sharing" },
-    h("h4", null, "Share this one record"),
-    h(
-      "p",
-      null,
-      "No automatic sharing. Private source containers cannot export records. Only individually approved, non-sensitive communication preferences can enter a private target or leave Personal.",
-    ),
-    h(
-      "p",
-      { style: muted },
-      Array.isArray(grants)
-        ? "See Current sharing for the active grant inventory. This inspector metadata does not authorize model recall."
-        : "The API does not list active grants here. A request is acknowledged by the server; this view cannot independently enumerate sharing.",
-    ),
-    h(Choice, {
-      label: "Sharing target",
-      value: target,
-      onChange: setTarget,
-      disabled: pending,
-      options: [
-        { value: "", label: "Choose a memory area" },
-        ...scopes
-          .filter((t) => t.id !== scope.id)
-          .map((t) => ({
-            value: t.id,
-            label: `${t.label}${t.private ? " · Private" : ""}${targets.some((eligible) => eligible.id === t.id) ? "" : " · Revoke only"}`,
-          })),
-      ],
-    }),
-    !targets.length &&
-      h("p", null, "This record has no eligible sharing targets."),
-    h(
-      "div",
-      { style: row },
-      button(
-        "Share this record",
-        () =>
-          void controller.action(
-            "/grants",
-            "POST",
-            payload,
-            "Sharing request acknowledged",
-          ),
-        pending || !targets.some((t) => t.id === target),
-      ),
-      button(
-        "Revoke sharing",
-        () =>
-          void controller.action(
-            "/grants",
-            "DELETE",
-            payload,
-            "Revocation request acknowledged",
-          ),
-        pending || !target,
-      ),
-    ),
-  );
-}
-function RecordView({ record, scope, scopes, grants, controller, pending, onEdit }) {
-  const [preview, setPreview] = useState(null);
-  const [sharing, setSharing] = useState(false);
-  return h(
-    "article",
-    {
-      style: {
-        ...section,
-        borderTop: "1px solid var(--ui-stroke-secondary)",
-        paddingTop: "1rem",
-        overflowWrap: "anywhere",
-      },
-    },
-    h("h3", null, record.title),
-    h(
-      "p",
-      { style: muted },
-      `${plain(record.state)} · ${plain(record.domain)} · ${plain(record.kind)} · ${plain(record.basis)} · revision ${record.revision}`,
-    ),
-    record.state === "invalidated" &&
-      h(
-        "p",
-        null,
-        "Invalidated — its evidence changed. This is not current recall.",
-      ),
-    record.kind === "procedure" &&
-      h("p", null, "Procedure draft only — not an active or executable skill."),
-    h("p", { style: { whiteSpace: "pre-wrap" } }, record.text),
-    h(
-      "details",
-      null,
-      h("summary", null, "Exact sources and record identity"),
-      h("p", null, `Record ${record.id} · Area ${record.scope_id}`),
-      (record.sources || []).map((source, index) =>
-        h(
-          "div",
-          { key: index, style: { marginBlock: "0.75rem" } },
-          h("code", null, source.ref),
-          source.quote &&
-            h(
-              "blockquote",
-              { style: { whiteSpace: "pre-wrap" } },
-              source.quote,
-            ),
-          source.sha256 && h("p", null, `SHA-256: ${source.sha256}`),
-          source.revision != null &&
-            h("p", null, `Source revision: ${source.revision}`),
-        ),
-      ),
-      h(
-        "p",
-        null,
-        `Dependencies: ${record.dependencies.map((pin) => `${pin.id} (revision ${pin.revision})`).join(", ") || "None"}`,
-      ),
-    ),
-    h(
-      "div",
-      { style: row },
-      button("Correct", () => onEdit(record), pending),
-      record.state === "pending" &&
-        button(
-          "Approve record",
-          () =>
-            void controller.action(
-              `/records/${encodeURIComponent(record.id)}/approve`,
-              "POST",
-              { expected_revision: record.revision },
-            ),
-          pending,
-        ),
-    ),
-
-    h(
-      "div",
-      { style: row },
-      button("Sharing", () => setSharing((v) => !v), pending),
-      button(
-        "Preview deletion",
-        async () => setPreview(await controller.deletionPreview(record)),
-        pending,
-      ),
-    ),
-    sharing && h(Sharing, { record, scope, scopes, grants, controller, pending }),
-    preview &&
-      h(
-        "section",
-        {
-          style: section,
-          role: "group",
-          "aria-label": "Confirm record deletion",
-        },
-        h("h4", null, `Delete “${record.title}”?`),
-        h(
-          "p",
-          null,
-          `Record revision ${preview.revision}. Dependent records affected: ${preview.dependent_ids.join(", ") || "None"}.`,
-        ),
-        h(
-          "p",
-          null,
-          "Deletes owned copies and derived content. Host transcripts, unknown exports and backups are outside this operation. This cannot erase earlier model context.",
-        ),
-        h(
-          "div",
-          { style: row },
-          button(
-            "Confirm deletion",
-            () =>
-              void controller.action(
-                `/records/${encodeURIComponent(record.id)}/delete`,
-                "POST",
-                { preview_token: preview.preview_token },
-                "Deleted",
-              ),
-            pending,
-            { variant: "destructive" },
-          ),
-          button("Keep record", () => setPreview(null), pending),
-        ),
-      ),
-  );
-}
-function Drafts({ data, scope, controller, pending }) {
-  const [ids, setIds] = useState([]);
-  const [kind, setKind] = useState("summary");
-  const [rebuild, setRebuild] = useState(false);
-  const enabled = data.status?.learning_enabled === true;
-  const evidence = data.records.filter((r) => r.state === "approved");
-  const selectedIds = ids.filter((id) => evidence.some((r) => r.id === id));
-  return h(
-    "section",
-    { style: section, "aria-label": "Drafts and index" },
-    h("h2", null, "Drafts and index"),
-    h(
-      "p",
-      null,
-      `Draft generation: ${enabled ? "enabled by you" : "off"}. Uses the host model only after opt-in and an explicit request. Results stay pending for review; no diagnoses or automatic skill activation.`,
-    ),
-    button(
-      enabled ? "Disable draft generation" : "Enable draft generation",
-      () => void controller.action("/learning", "POST", { enabled: !enabled }),
-      pending,
-    ),
-    enabled &&
-      h(
-        "div",
-        { style: { display: "grid", gap: "0.75rem" } },
-        h("p", null, "Choose approved records as evidence for this draft:"),
-        evidence.map((r) =>
-          h(
-            "label",
-            { key: r.id, style: row },
-            h("input", {
-              type: "checkbox",
-              disabled: pending,
-              checked: ids.includes(r.id),
-              "aria-label": `Use ${r.title} as draft evidence`,
-              onChange: (e) => {
-                const checked = e.target.checked;
-                setIds((old) =>
-                  checked ? [...old, r.id] : old.filter((id) => id !== r.id),
-                );
-              },
-            }),
-            r.title,
-          ),
-        ),
-        !evidence.length &&
-          h("p", null, "Approve sourced records before requesting a draft."),
-        h(Choice, {
-          label: "Draft kind",
-          value: kind,
-          options: ["summary", "observation", "procedure"],
-          onChange: setKind,
-          disabled: pending,
-        }),
-        kind === "observation" && h("p", null,
-          "An AI observation is stored as an interpretation (inference), not a directly observed fact. It stays pending until you review it."),
-        button(
-          "Generate pending draft",
-          () => data.model_policy?.mode==="follow_chat"
-            ? void requestChatModelDraft(controller,data,scope,selectedIds,kind)
-            : void controller.action(
-              "/draft",
-              "POST",
-              { scope_id: scope.id, record_ids: selectedIds, kind, ...(data.context?.policy_revision && data.context.chat_scope_id===scope.id ? {session_id:data.context.session_id} : {}) },
-              kind === "observation" ? "Pending AI interpretation requested (observation)" : "Pending draft requested",
-            ),
-          pending || !selectedIds.length,
-        ),
-      ),
-    h(
-      "p",
-      { style: muted },
-      `Index: ${plain(data.status?.index_state || "unknown")}. Authored records are separate from the replaceable index.`,
-    ),
-    button("Rebuild index", () => setRebuild(true), pending),
-    rebuild &&
-      h(
-        "section",
-        { role: "group", "aria-label": "Confirm index rebuild" },
-        h(
-          "p",
-          null,
-          "Build a staged ELM index generation. A failed rebuild must keep the prior valid generation; this UI does not replace indexes itself.",
-        ),
-        h(
-          "div",
-          { style: row },
-          button(
-            "Confirm index rebuild",
-            () =>
-              void controller.action(
-                "/index/rebuild",
-                "POST",
-                { scope_id: scope.id, confirm: true },
-                "Rebuild requested",
-              ),
-            pending,
-          ),
-          button("Cancel rebuild", () => setRebuild(false), pending),
-        ),
-      ),
-  );
-}
-function Privacy({ scope, controller, pending }) {
-  const [open, setOpen] = useState(false);
-  // The overview cannot prove that a durable chat has never contained messages.
-  // Therefore never offer a broadening operation for an existing private chat.
-  const cannotBroaden = scope.kind === "chat" && scope.private;
-  return h(
-    "div",
-    null,
-    button("Change privacy", () => setOpen((v) => !v), pending),
-    open &&
-      h(
-        "section",
-        {
-          style: section,
-          role: "group",
-          "aria-label": "Change memory privacy",
-        },
-        h(
-          "p",
-          null,
-          "This changes future recall only. It cannot erase earlier messages or model context. Broadening a populated chat is refused; use a fresh chat.",
-        ),
-        cannotBroaden
-          ? h(
-              "p",
-              null,
-              "Start a fresh chat to use a broader boundary. This existing private chat stays private.",
-            )
-          : button(
-              scope.private ? "Allow scoped recall" : "Make area private",
-              () =>
-                void controller.action("/scopes/privacy", "POST", {
-                  scope_id: scope.id,
-                  private: !scope.private,
-                }),
-              pending,
-            ),
-      ),
-  );
-}
-function Inspector({ data, controller, pending }) {
-  const [adding, setAdding] = useState(false);
-  // Authored corrections belong to the area, not a revision/topic row that a
-  // contradictory readback may replace or remove. Owner/area keys still clear it.
-  const [editing, setEditing] = useState(null);
-  const scope = data.scopes.find((s) => s.id === data.selected_scope_id);
-  const topics = [...new Set(data.records.map((r) => r.topic))];
-  return h(
-    "div",
-    null,
-    h(
-      "section",
-      { style: section, "aria-label": "Memory areas" },
-      h("h2", null, "Memory areas"),
-      h(
-        "p",
-        { style: muted },
-        "These are your inspector views. Selecting an area does not let the model recall it.",
-      ),
-      h(
-        "div",
-        { style: { ...row, alignItems: "start", gap: "1.5rem" } },
-        ["personal", "workspace", "chat"].map((kind) =>
-          h(
-            "section",
-            { key: kind, style: { minWidth: 0, flex: "1 1 12rem" } },
-            h(
-              "h3",
-              null,
-              kind === "chat"
-                ? "Individual chats"
-                : kind === "personal"
-                  ? "Personal"
-                  : "Workspaces",
-            ),
-            h(
-              "ul",
-              { style: { listStyle: "none", padding: 0 } },
-              data.scopes
-                .filter((s) => s.kind === kind)
-                .map((s) =>
-                  h(
-                    "li",
-                    { key: s.id, style: { marginBlock: "0.5rem" } },
-                    button(
-                      `${s.label}${s.private ? " · Private" : " · Scoped"}`,
-                      () => void controller.refresh(s.id),
-                      pending,
-                      {
-                        "aria-pressed": s.id === scope.id,
-                        style: {
-                          maxWidth: "100%",
-                          whiteSpace: "normal",
-                          textAlign: "left",
-                        },
-                      },
-                    ),
-                  ),
-                ),
-            ),
-          ),
-        ),
-      ),
-    ),
-    h(
-      "section",
-      { style: section },
-      h("h2", null, scope.label),
-      h(
-        "p",
-        { style: muted },
-        `${plain(scope.kind)} memory · ${scope.kind === "personal" ? "Personal facts stay here; only individually approved communication cards may be shared." : scope.private ? "Private container; cannot share its records outward." : "Scoped container; no automatic global sharing."}`,
-      ),
-      button("Add record", () => setAdding(true), pending),
-      h(Privacy, { scope, controller, pending }),
-      editing && h(RecordForm, {
-        key: editing.id,
-        record: editing,
-        scope,
-        controller,
-        pending,
-        onClose: () => setEditing(null),
-      }),
-      adding &&
-        h(RecordForm, {
-          scope,
-          data,
-          controller,
-          pending,
-          onClose: () => setAdding(false),
-        }),
-      !data.records.length && h("p", null, "No records in this area yet."),
-      topics.map((topic) =>
-        h(
-          "section",
-          { key: topic },
-          h("h3", null, plain(topic)),
-          data.records
-            .filter((r) => r.topic === topic)
-            .map((record) =>
-              h(RecordView, {
-                key: `${record.id}:${record.revision}`,
-                record,
-                scope,
-                scopes: data.scopes,
-                grants: data.grants,
-                controller,
-                pending,
-                onEdit: setEditing,
-              }),
-            ),
-        ),
-      ),
-    ),
-    h(
-      "section",
-      { style: section, "aria-label": "Current sharing" },
-      h("h2", null, "Current sharing"),
-      h("p", { style: muted }, "Human-only active sharing metadata. Inspecting an area or this inventory does not grant model recall."),
-      !Array.isArray(data.grants)
-        ? h("p", null, "Active sharing inventory unavailable from this API. Requests can be acknowledged, but sharing cannot be independently confirmed.")
-        : !data.grants.length
-          ? h("p", null, "No active shares in the current inventory.")
-          : h("ul", { style: { paddingInlineStart: "1.25rem", overflowWrap: "anywhere" } },
-            data.grants.map((g, i) => h("li", { key: i },
-              `${data.scopes.find((s) => s.id === g.source_scope)?.label || "Source"} (${g.source_scope}) → ${data.scopes.find((s) => s.id === g.target_scope)?.label || "Target"} (${g.target_scope}) · record ${g.record_id} · granted revision ${g.record_revision}`))),
-    ),
-    h(Drafts, { data, scope, controller, pending }),
-  );
-}
-function useMemory(controller) {
-  const epoch =
-    typeof SDK.useGatewayActivationEpoch === "function"
-      ? SDK.useGatewayActivationEpoch()
-      : null;
-  // The public SDK exposes an epoch getter and hook, not an atom. The layout
-  // effect clears a same-route activation before stale content can be painted.
-  useLayoutEffect(() => controller.reconcile(), [controller, epoch]);
-  return useSyncExternalStore(
-    controller.subscribe,
-    controller.getSnapshot,
-    controller.getSnapshot,
-  );
-}
-export function MemoryPage({ controller }) {
-  const s = useMemory(controller);
-  return h(
-    "main",
-    {
-      style: {
-        color: "var(--ui-text-primary)",
-        fontSize: "0.875rem",
-        lineHeight: 1.55,
-        maxWidth: "68rem",
-        width: "100%",
-        height: "100%",
-        overflowY: "auto",
-        boxSizing: "border-box",
-        marginInline: "auto",
-        padding: "1.25rem",
-        overflowWrap: "anywhere",
-      },
-      "aria-label": "Memory",
-    },
-    h(
-      "div",
-      { style: row },
-      h("h1", { style: { fontSize: "1.4rem", fontWeight: 600 } }, "Memory"),
-      button(
-        "Refresh",
-        () => void controller.refresh(),
-        s.pending || ["loading", "refreshing"].includes(s.phase),
-      ),
-    ),
-    h(
-      "section",
-      { style: section, "aria-label": "Current chat recall boundary" },
-      h("h2", null, "Current chat recall"),
-      h(
-        "p",
-        null,
-        s.stale
-          ? "Boundary not verified — refresh to check current recall."
-          : s.data?.context?.boundary ||
-              "Boundary unavailable — no memory content is shown.",
-      ),
-      s.data &&
-        h(
-          "p",
-          { style: muted },
-          `${s.data.context.label || "Focused chat"} · ${s.data.context.private ? "Private chat" : "Scoped chat"}`,
-        ),
-      h(
-        "p",
-        { style: muted },
-        "Private means an isolated memory recall boundary, not encryption or an OS sandbox. Earlier messages and model context are unchanged.",
-      ),
-    ),
-    h(
-      "div",
-      { role: "status", "aria-live": "polite" },
-      s.pending
-        ? "Saving…"
-        : ["loading", "refreshing"].includes(s.phase)
-          ? "Loading memory…"
-          : s.notice,
-    ),
-    s.error && h("p", { role: "alert" }, s.error),
-    s.stale &&
-      h(
-        "p",
-        { role: "status" },
-        "Previously loaded view — not verified as current. Your draft is retained, but saving is disabled until Refresh succeeds.",
-      ),
-    s.phase === "unconfigured" &&
-      h(
-        "section",
-        { style: section },
-        h("h2", null, "Set up workspace memory"),
-        h(
-          "p",
-          null,
-          "Create a fresh profile-owned store. This does not adopt your canonical ELM memory or widen existing permissions.",
-        ),
-        button(
-          "Create fresh memory store",
-          () => void controller.action("/setup", "POST", { confirm: true }),
-          s.pending || s.unconfirmed,
-        ),
-      ),
-    s.data?.setup &&
-      h(Inspector, {
-        key: `${s.ownerKey}:${s.data.selected_scope_id}`,
-        data: s.data,
-        controller,
-        pending: s.pending || s.unconfirmed || s.phase !== "ready",
-      }),
-  );
-}
-function BoundaryChip({ controller }) {
-  const s = useMemory(controller);
-  return h(
-    "span",
-    {
-      title:
-        s.data?.context?.boundary || s.error || "Memory boundary unavailable",
-      style: {
-        color: "var(--ui-text-secondary)",
-        maxWidth: "20rem",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
-        display: "inline-block",
-      },
-    },
-    `Memory: ${s.stale ? "boundary not verified" : s.phase === "loading" ? "loading" : s.data?.setup ? s.data.context.boundary : s.phase === "unconfigured" ? "not set up" : "unavailable"}`,
-  );
-}
-
-// Product-result state deliberately lives outside workspace memory. All REST
-// requests remain ambient-only and fail closed for a foreign focused owner.
-function productIdentity(host) {
-  const s = host?.state || {};
-  const session = value(s.focusedStoredSessionId), profile = value(s.focusedSessionProfile);
-  const owner = value(s.focusedSessionOwner), connection = value(s.connectionId);
-  const ambient = value(s.profile), gateway = value(s.gateway);
-  const epoch = typeof SDK.gatewayActivationEpoch === "function" ? SDK.gatewayActivationEpoch() : null;
-  const key = JSON.stringify([session, profile, owner, connection, ambient, gateway, epoch]);
-  const error = !session ? "Focus a saved chat to view its Important results."
-    : !owner?.connectionId || !profile || !connection || !ambient ? "Focused chat ownership is unavailable."
-    : owner.profile !== profile || profile !== ambient || owner.connectionId !== connection
-      ? "This chat belongs to another profile or gateway. Select its owning gateway first; plugin REST cannot route there."
-    : gateway !== "open" ? "The gateway is unavailable. Reconnect, then refresh." : "";
-  return {session, profile, key, error};
-}
-const resultId = (id) => typeof id === "string" && /^[0-9a-f]{32}$/.test(id);
-function validResult(r, chat) {
-  return r && resultId(r.id) && r.chat_id === chat &&
-    ["session_id", "title", "body", "created_at", "updated_at"].every(k => typeof r[k] === "string") &&
-    r.title.trim() && [...r.title].length <= 300 && [...r.body].length <= 100000 &&
-    ["progress", "partial", "blocked", "final"].includes(r.kind) &&
-    ["unread", "viewed", "read"].includes(r.status) && typeof r.dismissed === "boolean" &&
-    Number.isSafeInteger(r.revision) && r.revision > 0;
-}
-const validAttention = p => p && ["quiet", "off"].includes(p.mode) &&
-  typeof p.updates_visible === "boolean" && Number.isSafeInteger(p.revision) && p.revision > 0;
-function validProductContext(d, session, chat = null) {
-  return d?.schema === 1 && d.context?.session_id === session &&
-    typeof d.context.chat_id === "string" && d.context.chat_id.length > 0 && (!chat || d.context.chat_id === chat);
-}
-function validResults(d, session) {
-  return validProductContext(d, session) && Array.isArray(d.results) &&
-    d.results.every(r => validResult(r, d.context.chat_id)) &&
-    new Set(d.results.map(r => r.id)).size === d.results.length && validAttention(d.attention) &&
-    ["unread", "viewed", "read", "dismissed"].every(k => Number.isSafeInteger(d.counts?.[k]) && d.counts[k] >= 0) &&
-    (d.next_cursor === null || typeof d.next_cursor === "string" && /^[1-9][0-9]{0,17}$/.test(d.next_cursor));
-}
-export function createImportantController(ctx, host = SDK.host) {
-  let disposed = false, generation = 0, ownerKey = "", showDismissed = false;
-  let snapshot = {data:null, phase:"idle", pending:false, unconfirmed:false, error:"", notice:"", ownerKey:"", detail:null};
-  const listeners = new Set();
-  const publish = change => {snapshot = {...snapshot, ...change}; for (const fn of listeners) fn();};
-  function sync() {
-    const identity = productIdentity(host);
-    if (identity.key !== ownerKey) {
-      ownerKey = identity.key; generation++; showDismissed = false;
-      publish({data:null, detail:null, phase:identity.error ? "unavailable" : "idle", error:identity.error,
-        pending:false, unconfirmed:false, notice:"", ownerKey});
-    }
-    return identity;
-  }
-  const live = (token,key) => !disposed && token === generation && productIdentity(host).key === key;
-  const query = (session, extra={}) => new URLSearchParams({session_id:session, ...extra});
-  async function list(current, cursor = null) {
-    const d = await ctx.rest(`/ui/results?${query(current.session, {limit:"100", include_dismissed:String(showDismissed), ...(cursor ? {cursor} : {})})}`, {timeoutMs:20000});
-    if (!validResults(d,current.session)) throw Error("Important results returned an incompatible chat, result or schema. Nothing was loaded.");
-    return d;
-  }
-  async function refresh(options = {}) {
-    const current = sync();
-    if (disposed || current.error || snapshot.pending) return false;
-    const before = snapshot.data, detail = snapshot.detail;
-    const filterChanged = typeof options.showDismissed === "boolean" && options.showDismissed !== showDismissed;
-    if (typeof options.showDismissed === "boolean") showDismissed = options.showDismissed;
-    const token = ++generation, key = current.key;
-    // Same-owner refresh is non-destructive: keyed cards, disclosures and
-    // optional update review stay mounted until the new read is verified.
-    publish({phase:before ? "refreshing" : "loading", pending:true, error:"", notice:""});
+    publish({ busy: true, error: '', notice: '', action: null, preview: null });
     try {
-      let d = await list(current);
-      if (!live(token,key)) return false;
-      if (before && d.context.chat_id !== before.context.chat_id) throw Error("The chat lineage changed. Refresh first.");
-      const boundary = !filterChanged && before?.results.at(-1)?.id;
-      const cursors = new Set();
-      while (boundary && !d.results.some(r=>r.id===boundary) && d.next_cursor) {
-        if (cursors.has(d.next_cursor) || d.results.length >= 1000) throw Error("The result pages changed. Refresh before continuing.");
-        cursors.add(d.next_cursor);
-        const page = await list(current,d.next_cursor);
-        if (!live(token,key)) return false;
-        if (page.context.chat_id !== d.context.chat_id) throw Error("The chat lineage changed. Refresh first.");
-        const results = [...d.results,...page.results];
-        if (new Set(results.map(r=>r.id)).size !== results.length) throw Error("The result pages changed. Refresh before continuing.");
-        d = {...page,results};
-      }
-      const observed = detail ? await exact(current,detail.id,d.context.chat_id) : null;
-      if (!live(token,key)) return false;
-      publish({data:d, detail:observed?.exists ? observed.result : null, phase:"ready", pending:false, unconfirmed:false, notice:"", showDismissed});
-      return true;
-    } catch (e) {
-      if (live(token,key)) publish({phase:"error", pending:false, error:e.message || "Results could not be loaded."});
-      return false;
-    }
-  }
-  async function more() {
-    const current = sync(), before = snapshot.data;
-    if (disposed || current.error || snapshot.pending || !before?.next_cursor || snapshot.unconfirmed) return false;
-    const token = ++generation, key = current.key;
-    publish({pending:true, error:""});
-    try {
-      const d = await list(current,before.next_cursor);
-      if (!live(token,key)) return false;
-      if (d.context.chat_id !== before.context.chat_id) throw Error("The chat lineage changed. Refresh first.");
-      const merged = [...before.results, ...d.results];
-      if (new Set(merged.map(r=>r.id)).size !== merged.length) throw Error("The result pages changed. Refresh before continuing.");
-      publish({data:{...d, results:merged}, pending:false}); return true;
-    } catch(e) {if (live(token,key)) publish({pending:false,error:e.message}); return false;}
-  }
-  async function exact(current,id,chat) {
-    const d = await ctx.rest(`/ui/results/${id}?${query(current.session)}`, {timeoutMs:20000});
-    if (!validProductContext(d,current.session,chat) || d.id !== id || typeof d.exists !== "boolean" ||
-        (d.exists ? !validResult(d.result,d.context.chat_id) || d.result.id !== id : d.result !== null))
-      throw Error("The exact result readback could not be verified.");
-    return d;
-  }
-  async function openResult(id, pin) {
-    const current=sync();
-    if (disposed || current.error || pin !== ownerKey || !resultId(id) || snapshot.pending) return false;
-    const token=++generation,key=current.key;
-    publish({detail:null,error:""});
-    try {
-      const d=await exact(current,id,snapshot.data?.context.chat_id);
-      if (!live(token,key)) return false;
-      publish({detail:d.exists ? d.result : null,notice:d.exists ? "" : "This saved result is unavailable in the focused chat (deleted, compacted away, or owned elsewhere)."});return d.exists;
-    } catch(e){if(live(token,key))publish({error:e.message});return false;}
-  }
-  function writable(pin) {
-    const current = sync();
-    return !disposed && !current.error && pin === ownerKey && snapshot.data &&
-      snapshot.phase === "ready" && !snapshot.pending && !snapshot.unconfirmed ? current : null;
-  }
-  async function write(pin, operation) {
-    const current = writable(pin);
-    if (!current) return false;
-    const token = ++generation, key = current.key;
-    publish({pending:true, error:"", notice:"Saving…"});
-    try {
-      const change = await operation(current, () => live(token,key));
-      if (!live(token,key)) return false;
-      publish({...change, pending:false, unconfirmed:false, notice:"Saved and verified by exact readback."});return true;
-    } catch(e) {
-      if (live(token,key)) publish({pending:false, unconfirmed:true, error:e.message || "The write failed.",
-        notice:"Outcome unconfirmed. Refresh to reconcile before another action; nothing is retried automatically."});
-      return false;
-    }
-  }
-  async function mutate(r, action, pin) {
-    if (!["view","read","dismiss","restore","delete"].includes(action)) return false;
-    return write(pin, async (current, stillLive) => {
-      const before = snapshot.data;
-      const known = before.results.find(x=>x.id===r.id) || (snapshot.detail?.id === r.id ? snapshot.detail : null);
-      if (!known || !same(known,r)) throw Error("This result is stale. Refresh and review first.");
-      const path = `/ui/results/${r.id}${action === "delete" ? "" : `/${action}`}`;
-      const receipt = await ctx.rest(path, {method:action === "delete" ? "DELETE" : "POST",
-        body:{session_id:current.session, expected_revision:r.revision},timeoutMs:20000});
-      if (!stillLive()) throw Error("Chat changed during the write.");
-      const observed = await exact(current,r.id,before.context.chat_id);
-      if (!stillLive()) throw Error("Chat changed during readback.");
-      const result=receipt?.result;
-      if (receipt?.ok !== true) throw Error(receipt?.message || "The write was not acknowledged.");
-      if (action === "delete") {
-        if (result?.deleted_id !== r.id || result.deleted_revision !== r.revision || observed.exists)
-          throw Error("Deletion was not confirmed for the exact result revision.");
-      } else {
-        const intendedStatus = action === "read" ? "read" : action === "view" && r.status === "unread" ? "viewed" : r.status;
-        const intendedDismissed = action === "dismiss" ? true : action === "restore" ? false : r.dismissed;
-        const changed = intendedStatus !== r.status || intendedDismissed !== r.dismissed;
-        if (!observed.exists || !same(observed.result,result) || !validResult(result,before.context.chat_id) ||
-            result.id !== r.id || result.status !== intendedStatus || result.dismissed !== intendedDismissed ||
-            result.revision !== r.revision + Number(changed) ||
-            ["title","body","kind","session_id","created_at"].some(k=>result[k] !== r[k]))
-          throw Error("The exact result does not match the requested change.");
-      }
-      const d=await list(current);
-      if (d.context.chat_id !== before.context.chat_id) throw Error("Chat changed during refresh.");
-      // The exact readback certifies this target, not a replacement first page.
-      // Keep the loaded keyset/cursor so opening older output cannot evict it.
-      const results=before.results.flatMap(row=>row.id !== r.id ? [row]
-        : observed.exists && (showDismissed || !observed.result.dismissed) ? [observed.result] : []);
-      return {data:{...d,results,next_cursor:before.next_cursor},
-        detail:snapshot.detail?.id === r.id ? observed.result : snapshot.detail};
-    });
-  }
-  async function setAttention(changes,pin) {
-    return write(pin, async (current,stillLive) => {
-      if (!changes || Object.keys(changes).sort().join(',') !== 'mode,updates_visible' || !["quiet","off"].includes(changes.mode) || typeof changes.updates_visible !== "boolean")
-        throw Error("Unsupported attention preferences.");
-      const old=snapshot.data.attention, chat=snapshot.data.context.chat_id;
-      const receipt=await ctx.rest('/ui/attention',{method:"POST",body:{session_id:current.session,expected_revision:old.revision,...changes},timeoutMs:20000});
-      if(!stillLive())throw Error("Chat changed during preference save.");
-      const d=await ctx.rest(`/ui/attention?${query(current.session)}`,{timeoutMs:20000});
-      if(!validProductContext(d,current.session,chat) || receipt?.ok !== true || !validAttention(receipt.result) ||
-          !same(receipt.result,d.attention) || !contains(receipt.result,changes) || receipt.result.revision !== old.revision+1)
-        throw Error("The preference receipt and independent readback do not match the requested value.");
-      return {data:{...snapshot.data,attention:d.attention}};
-    });
-  }
-  function reconcile(){sync();}
-  const unlisten=["focusedStoredSessionId","focusedSessionProfile","focusedSessionOwner","profile","connectionId","gateway"]
-    .map(k=>host?.state?.[k]).filter(a=>typeof a?.listen === "function").map(a=>a.listen(reconcile));
-  sync();
-  return {getSnapshot:()=>snapshot, subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},
-    refresh,more,mutate,setAttention,openResult,reconcile,
-    dispose(){disposed=true;generation++;for(const fn of unlisten)fn();listeners.clear();}};
-}
-
-// Native updater state is independent of memory and invalidates with the same
-// public host ownership/lifetime tuple as the result inbox.
-const updateKey = r => `${r.type}:${r.name}`;
-const validUpdate = r => r && ["skill","plugin"].includes(r.type) &&
-  ["name","source","identifier","current","target","status","detail"].every(k=>typeof r[k] === "string") &&
-  typeof r.selectable === "boolean" && (!r.selectable || r.status === "update_available" &&
-    (r.type === "skill" ? /^sha256:[0-9a-f]{16}$/.test(r.target) : /^[0-9a-fA-F]{40}$/.test(r.target)));
-export function createUpdatesController(ctx, host = SDK.host) {
-  let disposed=false,generation=0,key="";
-  let snapshot={rows:[],errors:[],outcomes:[],phase:"idle",pending:false,unconfirmed:false,error:"",ownerKey:"",policy:""};
-  const listeners=new Set(),publish=change=>{snapshot={...snapshot,...change};for(const fn of listeners)fn();};
-  function sync(){const i=productIdentity(host);if(i.key!==key){key=i.key;generation++;publish({rows:[],errors:[],outcomes:[],phase:i.error?"unavailable":"idle",pending:false,unconfirmed:false,error:i.error,ownerKey:key,policy:""});}return i;}
-  const live=(t,k)=>!disposed && t===generation && productIdentity(host).key===k;
-  async function check(){
-    const i=sync();if(disposed || i.error || snapshot.pending)return false;
-    const token=++generation,k=i.key;
-    publish({phase:"checking",pending:true,rows:[],errors:[],error:""});
-    try{
-      const d=await ctx.rest('/ui/updates/check',{method:"POST",body:{session_id:i.session},timeoutMs:120000});
-      if(!live(token,k))return false;
-      if(!validProductContext(d,i.session) || !Array.isArray(d.rows) || !d.rows.every(validUpdate) || new Set(d.rows.map(updateKey)).size!==d.rows.length ||
-        !Array.isArray(d.errors) || !d.errors.every(e=>["skill","plugin"].includes(e?.type) && typeof e.message==="string") || typeof d.policy!=="string")
-        throw Error("Native update inventory is incompatible or incomplete; no updates can be selected.");
-      publish({rows:d.rows,errors:d.errors,policy:d.policy,phase:"ready",pending:false,unconfirmed:false,chat:d.context.chat_id});return true;
-    }catch(e){if(live(token,k))publish({phase:"error",pending:false,error:e.message});return false;}
-  }
-  async function apply(selected,pin){
-    const i=sync();
-    if(disposed || i.error || pin!==key || snapshot.pending || snapshot.unconfirmed || snapshot.phase!=="ready" ||
-      !Array.isArray(selected) || !selected.length || new Set(selected.map(updateKey)).size!==selected.length ||
-      !selected.every(r=>r.selectable && snapshot.rows.some(x=>same(x,r))))return false;
-    const token=++generation,k=i.key,outcomes=[];
-    publish({pending:true,error:"",outcomes:[],phase:"applying"});
-    for(const r of selected){
-      try{
-        // Never re-check/replace a user's selection with a newer inferred target.
-        const receipt=await ctx.rest('/ui/updates/apply',{method:"POST",body:{session_id:i.session,selection:r},timeoutMs:180000});
-        if(!live(token,k))return false;
-        const d=await ctx.rest(`/ui/updates/installed?${new URLSearchParams({session_id:i.session,type:r.type,name:r.name})}`,{timeoutMs:20000});
-        if(!live(token,k))return false;
-        const result=receipt?.result;
-        if(receipt?.ok!==true || !contains(result,{type:r.type,name:r.name,current:r.current,target:r.target,observed:r.target,status:"updated"}) ||
-            !validProductContext(d,i.session,snapshot.chat) || d.type!==r.type || d.name!==r.name || d.observed!==r.target)
-          throw Error("The selected native update's exact installed target is unconfirmed.");
-        outcomes.push({key:updateKey(r),status:"updated",detail:result.detail || "Exact installed target verified."});
-        publish({outcomes:[...outcomes],rows:snapshot.rows.map(x=>updateKey(x)===updateKey(r)?{...x,selectable:false,status:"updated"}:x)});
-      }catch(e){
-        if(live(token,k)){
-          outcomes.push({key:updateKey(r),status:"failed or unknown",detail:e.message});
-          publish({outcomes,pending:false,phase:"error",unconfirmed:true,error:"Update stopped. Check installed state before another selection; no failed or remaining item is retried automatically."});
+      if (lane === 'project' && guard) {
+        const binding = await rpc('workspace.status'), status = await rpc('status');
+        if (!matchingBinding(binding, status) || !expectedProject || projectKey(binding, status) !== expectedProject || status.project_read_authorized !== true || status.consent_version !== 2) {
+          publish({ records: [], trash: [], selected: null, projectStatus: null, projectKey: null, ready: false });
+          throw new Error('Project snapshot changed');
         }
-        return false;
       }
+      const patch = await fn(rpc);
+      if (valid()) publish({ ...patch, busy: false });
+    } catch {
+      if (valid()) publish({ busy: false, selected: null, selectedSource: null, recallSettings: null, captureSettings: null, capturedTurns: [], captureNext: null, curationStatus: null, curationPreview: null, organizerPreview: null, curationJobs: [], curationJobsNext: null, selectedJob: null, importReceipts: [], importNext: null, selectedImport: null, folderStatus: null, preview: null, action: null,
+        ...(lane === 'project' ? { records: [], trash: [], projectStatus: null, projectKey: null, ready: false } : {}),
+        uncertain: mutation || state.uncertain,
+        error: mutation ? 'The outcome is uncertain. Do not repeat the action. Refresh records and trash to inspect what happened.'
+          : readError || 'Memory could not be read. Check host support and ownership, then refresh. No automatic retry.' });
     }
-    publish({outcomes,pending:false,phase:"ready"});return true;
   }
-  const unlisten=["focusedStoredSessionId","focusedSessionProfile","focusedSessionOwner","profile","connectionId","gateway"].map(k=>host?.state?.[k]).filter(a=>typeof a?.listen==="function").map(a=>a.listen(sync));
-  sync();return {getSnapshot:()=>snapshot,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},check,apply,reconcile:()=>{sync();},dispose(){disposed=true;generation++;unlisten.forEach(f=>f());listeners.clear();}};
+  const api = {
+    subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    getSnapshot: () => state,
+    currentKey: () => reviewIdentity(host, epoch).key,
+    sync,
+    dispose() { disposed = true; generation++; for (const stop of subscriptions) stop(); listeners.clear(); state = blank('disposed'); },
+    refresh() {
+      if (lane === 'project') {
+        sync(); if (state.busy) return;
+        publish({ records: [], trash: [], selected: null, preview: null, action: null, projectStatus: null, projectKey: null, ready: false });
+        return operation(async rpc => {
+          const binding = await rpc('workspace.status');
+          let status;
+          try { status = await rpc('status'); } catch {
+            return { binding, ready: true, initialized: false, projectStatus: null, projectKey: null,
+              error: 'Project consent is unavailable. If the binding was archived or deleted, explicitly unbind first, refresh, then review revocation. No access was enabled.' };
+          }
+          if (!matchingBinding(binding, status)) throw new Error('Project binding changed during refresh');
+          const base = { binding, projectStatus: status, projectKey: projectKey(binding, status), ready: true,
+            initialized: status.initialized, selected: null, uncertain: false };
+          if (status.project_read_authorized !== true || status.consent_version !== 2) return { ...base, records: [], trash: [], next: null, trashNext: null,
+            notice: 'No effective project access. Binding and stored consent are not permission by themselves.' };
+          const [list, trash] = await Promise.all([rpc('list', { state: state.filter }), rpc('trash')]);
+          if (list.consent_revision !== status.consent_revision || trash.consent_revision !== status.consent_revision || list.context_key !== status.context_key || trash.context_key !== status.context_key) throw new Error('Consent changed during refresh');
+          return { ...base, records: list.records, next: list.next_before, listConsent: list.consent_revision, trash: trash.items, trashNext: trash.next_before, trashConsent: trash.consent_revision,
+            notice: 'Project snapshot refreshed. Independently consenting chats of this principal share this project pool.' };
+        }, false, false);
+      }
+      return operation(async rpc => {
+        const status = await rpc('status');
+        if (!status.initialized) return { ...blank(identity.key), ready: true, initialized: false };
+        const [list, trash] = await Promise.all([rpc('list', { state: state.filter }), rpc('trash')]);
+        return { ready: true, initialized: true, selectedSource: null, records: list.records, next: list.next_before,
+          trash: trash.items, trashNext: trash.next_before, selected: null, uncertain: false,
+          notice: 'Current chat refreshed. Source labels are declared provenance, not verified truth.' };
+      });
+    },
+    refreshChatFolders(ownerKey = state.ownerKey) {
+      if (lane !== 'private' || sync().key !== ownerKey) return;
+      return operation(async rpc => ({ folderStatus: await rpc('chat_folders.status'), uncertain:false }));
+    },
+    stageChatFolder(kind, payload, ownerKey = state.ownerKey, renderedStatus = state.folderStatus) {
+      sync(); const status=state.folderStatus;
+      if (lane !== 'private' || ownerKey!==identity.key || identity.error || state.busy || state.uncertain || !status || renderedStatus!==status || !['create','file','undo','rename','remove'].includes(kind)) return;
+      if (kind==='create' && (typeof payload!=='string' || !payload.trim() || [...payload].length>80)) return;
+      if (kind==='file' && payload!==null && !status.folders.some(folder=>folder.id===payload)) return;
+      if (kind==='undo' && !status.undo_available) return;
+      if (kind==='rename' && (!payload || typeof payload!=='object' || !status.folders.some(folder=>folder.id===payload.folder_id) || typeof payload.label!=='string' || !payload.label.trim() || payload.label!==payload.label.trim() || [...payload.label].length>80)) return;
+      if (kind==='remove' && !status.folders.some(folder=>folder.id===payload && folder.removable===true)) return;
+      if (kind==='rename') payload={folder_id:payload.folder_id,label:payload.label};
+      publish({ action: {kind:'folder_'+kind,ownerKey:identity.key,payload,target:{revision:status.revision,context_key:status.context_key,current_session_id:status.current_session_id}, label:kind==='rename'?`${status.folders.find(folder=>folder.id===payload.folder_id).label} → ${payload.label}`:['file','remove'].includes(kind)?(status.folders.find(folder=>folder.id===payload)?.label || 'Unfiled'):payload},preview:null });
+    },
+    chatFolderSnapshot() {
+      const current=sync(), status=state.folderStatus, owner=read(host.state?.focusedSessionOwner);
+      if (lane!=='private' || current.error || !status || state.busy || state.uncertain || !owner) return null;
+      return { owner:{connectionId:owner.connectionId,profile:owner.profile,storedSessionId:read(host.state.focusedStoredSessionId),runtimeSessionId:current.session,epoch:epoch()},context_key:status.context_key,revision:status.revision,folders:structuredClone(status.folders),members:structuredClone(status.members) };
+    },
+    previewImport(exportText, ownershipDeclared, ownerKey = state.ownerKey) {
+      if (lane !== 'private' || sync().key !== ownerKey || ownershipDeclared !== true || typeof exportText !== 'string' || !exportText || new TextEncoder().encode(exportText).length > 65536) return;
+      return operation(async rpc => ({ preview: await rpc('import.preview', { export_text: exportText, ownership_declared: true }),
+        action: { kind: 'import_copy', ownerKey: identity.key, payload: { export_text: exportText, ownership_declared: true } } }));
+    },
+    refreshImports(before = null, ownerKey = state.ownerKey) {
+      if (lane !== 'private' || sync().key !== ownerKey) return;
+      return operation(async rpc => {
+        const reply = await rpc('import.list', before ? { before } : {});
+        return { importReceipts: before ? [...state.importReceipts, ...reply.receipts] : reply.receipts, importNext: reply.next_before, selectedImport: null };
+      });
+    },
+    inspectImport(batchId, ownerKey = state.ownerKey) {
+      if (lane !== 'private' || sync().key !== ownerKey) return;
+      return operation(async rpc => ({ selectedImport: (await rpc('import.get', { batch_id: batchId })).receipt }));
+    },
+    refreshJobs(before = null, ownerKey = state.ownerKey) {
+      if (lane !== 'private' || sync().key !== ownerKey) return;
+      return operation(async rpc => {
+        const reply = await rpc('curation.jobs.list', before ? { before } : {});
+        return { curationJobs: before ? [...state.curationJobs, ...reply.jobs] : reply.jobs, curationJobsNext: reply.next_before, selectedJob: null };
+      });
+    },
+    inspectJob(jobId, ownerKey = state.ownerKey) {
+      if (lane !== 'private' || sync().key !== ownerKey) return;
+      return operation(async rpc => ({ selectedJob: (await rpc('curation.jobs.get', { job_id: jobId })).job }));
+    },
+    stageProposal(index, ownerKey = state.ownerKey, renderedJob = state.selectedJob) {
+      sync();
+      const job = state.selectedJob;
+      if (lane !== 'private' || ownerKey !== identity.key || identity.error || state.busy || state.uncertain || !job || job !== renderedJob || job.state !== 'ready' || !Number.isInteger(index) || index < 0 || !job.proposals?.[index] || job.accepted_indexes.includes(index)) return;
+      publish({ action: { kind: 'proposal_accept', ownerKey, target: { job_id: job.job_id, revision: job.revision, index }, payload: structuredClone(job.proposals[index]) }, preview: null });
+    },
+    refreshCuration(ownerKey = state.ownerKey) {
+      if (lane !== 'private' || sync().key !== ownerKey) return;
+      return operation(async rpc => {
+        const status = await rpc('curation.status');
+        if (status.dispatch_supported !== false || status.external_egress_enabled !== false) throw new Error('Unsupported curation contract');
+        return { curationStatus: status, curationPreview: null };
+      });
+    },
+    previewCuration(sourceIds, ownerKey = state.ownerKey, renderedStatus = state.curationStatus) {
+      if (lane !== 'private' || sync().key !== ownerKey || !renderedStatus || renderedStatus !== state.curationStatus) return;
+      if (!Array.isArray(sourceIds) || sourceIds.length < 1 || sourceIds.length > 4 || new Set(sourceIds).size !== sourceIds.length || sourceIds.some(id => typeof id !== 'string' || !id || id !== id.trim())) return;
+      const ids = [...sourceIds];
+      return operation(async rpc => {
+        const preview = await rpc('curation.preview', { source_ids: ids });
+        if (preview.dispatch_supported !== false || preview.consent_granted !== false || preview.payload_kind !== 'local_candidate_not_dispatchable' || (preview.external_egress_enabled !== undefined && preview.external_egress_enabled !== false) || !preview.destination || Object.values(preview.destination).some(value => value !== null)) throw new Error('Unsupported destination contract');
+        return { curationPreview: preview };
+      });
+    },
+    prepareOrganizer(sourceIds, ownerKey = state.ownerKey, maxOutputTokens=512) {
+      if (lane !== 'private' || sync().key !== ownerKey || state.busy || !Number.isInteger(maxOutputTokens)||maxOutputTokens<1||maxOutputTokens>512|| !Array.isArray(sourceIds) || sourceIds.length<1 || sourceIds.length>4 || new Set(sourceIds).size!==sourceIds.length || sourceIds.some(id=>typeof id!=='string'||!id||id!==id.trim())) return;
+      const ids=[...sourceIds], previous=state.organizerPreview;
+      publish({organizerPreview:null});
+      return operation(async rpc=>{
+        if(previous) await rpc('curation.organizer.cancel',{preview_token:previous.preview_token});
+        const result=await rpc('curation.organizer.preview',{source_ids:ids,max_output_tokens:maxOutputTokens});
+        if(!validOrganizerPreview(result,ids,maxOutputTokens))throw new Error('Unsupported organizer preparation');
+        return {organizerPreview:result};
+      });
+    },
+    executeOrganizer(accepted, ownerKey=state.ownerKey, renderedPreview=state.organizerPreview) {
+      if(lane!=='private'||sync().key!==ownerKey||state.busy||state.uncertain||accepted!==true||!renderedPreview||renderedPreview!==state.organizerPreview||renderedPreview.production_dispatch_supported!==true)return;
+      publish({organizerPreview:null});
+      return operation(async rpc=>{
+        const job=await rpc('curation.organizer.execute',{preview_token:renderedPreview.preview_token,payload_sha256:renderedPreview.payload_sha256,confirm:true,accept_unknown_cost:true});
+        if(job?.job_id!==renderedPreview.job_id||job.state!=='ready')throw new Error('Organizer outcome unconfirmed');
+        return {notice:'Organizer result retained. Review the job and each proposal separately; no memory was approved automatically.'};
+      },true);
+    },
+    cancelOrganizer(ownerKey=state.ownerKey, renderedPreview=state.organizerPreview) {
+      if(lane!=='private'||sync().key!==ownerKey||state.busy||!renderedPreview||renderedPreview!==state.organizerPreview)return;
+      publish({organizerPreview:null});
+      return operation(async rpc=>{const reply=await rpc('curation.organizer.cancel',{preview_token:renderedPreview.preview_token});if(reply?.cancelled!==true)throw new Error('Cancellation unconfirmed');return {notice:'Prepared organizer preview cancelled. Nothing was sent.'};});
+    },
+    refreshCaptureSettings(ownerKey = state.ownerKey) {
+      if (lane !== 'private' || sync().key !== ownerKey) return;
+      return operation(async rpc => ({ captureSettings: await rpc('capture_settings.status') }));
+    },
+    previewCaptureSettings(payload, ownerKey = state.ownerKey, renderedSettings = state.captureSettings) {
+      if (lane !== 'private' || sync().key !== ownerKey || !renderedSettings || renderedSettings !== state.captureSettings || state.uncertain) return;
+      const captured = structuredClone(payload);
+      if (typeof captured.enabled !== 'boolean' || !Number.isInteger(captured.max_turns) || captured.max_turns < 1 || captured.max_turns > 32 || !Number.isInteger(captured.max_utf8_bytes) || captured.max_utf8_bytes < 2048 || captured.max_utf8_bytes > 32768 || (captured.enabled && !renderedSettings.host_supported)) return;
+      return operation(async rpc => ({ preview: await rpc('capture_settings.preview', captured),
+        action: { kind: 'capture_settings', payload: captured, ownerKey: identity.key } }));
+    },
+    refreshCapturedTurns(before = null, ownerKey = state.ownerKey) {
+      if (lane !== 'private' || sync().key !== ownerKey) return;
+      return operation(async rpc => {
+        const reply = await rpc('capture.list', before ? { before } : {});
+        return { capturedTurns: before ? [...state.capturedTurns, ...reply.turns] : reply.turns, captureNext: reply.next_before };
+      });
+    },
+    refreshRecall(ownerKey = state.ownerKey) {
+      if (lane !== 'private' || sync().key !== ownerKey) return;
+      return operation(async rpc => ({ recallSettings: await rpc('recall_settings.status') }));
+    },
+    previewRecall(payload, ownerKey = state.ownerKey, renderedSettings = state.recallSettings) {
+      if (lane !== 'private' || sync().key !== ownerKey || !renderedSettings || renderedSettings !== state.recallSettings || state.uncertain) return;
+      const captured = structuredClone(payload);
+      if (typeof captured.enabled !== 'boolean' || !Number.isInteger(captured.max_records) || captured.max_records < 1 || captured.max_records > 8 || !Number.isInteger(captured.max_utf8_bytes) || captured.max_utf8_bytes < 512 || captured.max_utf8_bytes > 16384 || (captured.enabled && !renderedSettings.host_supported)) return;
+      return operation(async rpc => ({ preview: await rpc('recall_settings.preview', captured),
+        action: { kind: 'recall_settings', payload: captured, ownerKey: identity.key } }));
+    },
+    previewConsent(action, ownerKey = state.ownerKey) {
+      if (lane !== 'project' || sync().key !== ownerKey || !['grant', 'revoke'].includes(action)) return;
+      return operation(async rpc => ({ preview: await rpc('consent.preview', { action }),
+        action: { kind: 'consent', payload: action, ownerKey: identity.key } }), false, false);
+    },
+    previewBinding(projectId, ownerKey = state.ownerKey) {
+      if (lane !== 'project' || sync().key !== ownerKey) return;
+      if (projectId !== null && (typeof projectId !== 'string' || !projectId.trim() || projectId !== projectId.trim())) return;
+      return operation(async rpc => ({ preview: await rpc('workspace.project.preview', { project_id: projectId }),
+        action: { kind: 'binding', payload: projectId, ownerKey: identity.key } }), false, false);
+    },
+    filter(filter) { if (!states.includes(filter) || state.busy) return; publish({ filter, selected: null, action: null }); return api.refresh(); },
+    more(trash = false, ownerKey = state.ownerKey) {
+      if (sync().key !== ownerKey) return;
+      const cursor = trash ? state.trashNext : state.next;
+      if (!cursor) return;
+      return operation(async rpc => {
+        const reply = await rpc(trash ? 'trash' : 'list', { before: cursor, ...(trash ? {} : { state: state.filter }) });
+        return trash ? { trash: [...state.trash, ...reply.items], trashNext: reply.next_before, trashConsent: reply.consent_revision }
+          : { records: [...state.records, ...reply.records], next: reply.next_before, listConsent: reply.consent_revision };
+      });
+    },
+    inspect(id, ownerKey = state.ownerKey) { if (sync().key !== ownerKey) return; return operation(async rpc => ({ selected: await rpc('get', { record_id: id }) })); },
+    stage(kind, payload = null, ownerKey = state.ownerKey, target = state.selected?.record, renderedProjectKey = state.projectKey) {
+      sync(); if (ownerKey !== identity.key || (lane === 'project' && renderedProjectKey !== state.projectKey) || state.busy || state.uncertain || identity.error) return;
+      if (['approve', 'correct'].includes(kind) && (!target || !state.selected ||
+          target.id !== state.selected.record.id || target.revision !== state.selected.record.revision)) return;
+      if (kind === 'restore' && !state.trash.some(item => item.recovery_id === payload)) return;
+      if (kind === 'setup' && (lane !== 'private' || state.initialized !== false)) return;
+      if (kind === 'create' && (!state.ready || !state.initialized)) return;
+      if (kind === 'create' && lane === 'project' && payload?.sources?.some(source => !manualSourceAllowed(source.ref, true))) {
+        publish({ action: null, preview: null, error: 'Private snapshot references cannot be used as project source authority. Use a declared external reference; nothing is copied or shared.' }); return;
+      }
+      if (kind === 'source_withdraw') {
+        const source = state.selectedSource?.source;
+        if (lane !== 'private' || !source || !target || target.source_id !== source.source_id || target.revision !== source.revision) return;
+      }
+      if (lane === 'project' && (state.projectStatus?.project_read_authorized !== true || state.projectStatus?.consent_version !== 2)) return;
+      const stagedPayload = payload && typeof payload === 'object' ? structuredClone(payload) : payload;
+      publish({ action: { kind, payload: stagedPayload, ownerKey: identity.key, projectKey: state.projectKey, consentRevision: kind === 'create' ? state.projectStatus?.consent_revision : kind === 'restore' ? state.trashConsent : state.selected?.consent_revision, target: target && { id: target.id, source_id: target.source_id, revision: target.revision, sha256: target.sha256, title: target.title } }, preview: null });
+    },
+    refreshSources(before = null, ownerKey = state.ownerKey) {
+      if (lane !== 'private' || sync().key !== ownerKey || !state.initialized) return;
+      return operation(async rpc => {
+        const reply = await rpc('source.list', before ? { before } : {});
+        return { sources: before ? [...state.sources, ...reply.sources] : reply.sources,
+          sourceNext: reply.next_before, selectedSource: null };
+      });
+    },
+    inspectSource(sourceId, ownerKey = state.ownerKey) {
+      if (lane !== 'private' || sync().key !== ownerKey || !state.initialized) return;
+      return operation(async rpc => ({ selectedSource: await rpc('source.get', { source_id: sourceId }) }));
+    },
+    previewSource(payload, ownerKey = state.ownerKey) {
+      if (lane !== 'private' || sync().key !== ownerKey || !state.ready || !state.initialized) return;
+      const captured = structuredClone(payload);
+      return operation(async rpc => ({ preview: await rpc('source.preview', captured),
+        action: { kind: 'source_capture', payload: captured, ownerKey: identity.key } }));
+    },
+    previewExcerpt(payload, ownerKey = state.ownerKey, source = state.selectedSource?.source) {
+      if (lane !== 'private' || sync().key !== ownerKey || !source || source.state !== 'active') return;
+      const selected = state.selectedSource?.source;
+      if (!selected || source.source_id !== selected.source_id || source.revision !== selected.revision || source.sha256 !== selected.sha256) return;
+      const captured = structuredClone(payload), target = { source_id: source.source_id, revision: source.revision, sha256: source.sha256 };
+      return operation(async rpc => {
+        const preview = await rpc('excerpt.preview', { ...captured, source_id: target.source_id });
+        if (preview.source_id !== target.source_id || preview.source_revision !== target.revision || preview.sha256 !== target.sha256) throw new Error('Source snapshot changed');
+        return { preview, action: { kind: 'excerpt', payload: captured, target, ownerKey: identity.key } };
+      }, false, true, 'Exact excerpt preview is unavailable. Check the source state and exact quote. Repeated matches require an explicit occurrence; no match is chosen automatically.');
+    },
+    cancel() { publish({ action: null, preview: null }); },
+    previewDelete(ownerKey = state.ownerKey, target = state.selected?.record) {
+      if (sync().key !== ownerKey) return;
+      const record = state.selected?.record;
+      if (!record || !target || target.id !== record.id || target.revision !== record.revision) return;
+      return operation(async rpc => ({ preview: await rpc('delete_preview', { record_id: record.id }),
+        action: { kind: 'delete', payload: null, ownerKey: identity.key, projectKey: state.projectKey } }));
+    },
+    confirm(expectedAction = state.action) {
+      sync(); const action = state.action, record = state.selected?.record, preview = state.preview;
+      if (!action || action !== expectedAction || action.ownerKey !== identity.key) return;
+      if (lane === 'project' && ['create', 'approve', 'correct', 'delete', 'restore'].includes(action.kind) && action.projectKey !== state.projectKey) return;
+      if (action.kind.startsWith('folder_') && (lane!=='private' || !state.folderStatus || state.folderStatus.revision!==action.target.revision || state.folderStatus.context_key!==action.target.context_key)) { publish({action:null}); return; }
+      if (action.kind === 'proposal_accept' && (lane !== 'private' || !state.selectedJob || state.selectedJob.job_id !== action.target.job_id || state.selectedJob.revision !== action.target.revision || state.selectedJob.accepted_indexes.includes(action.target.index))) { publish({ action: null }); return; }
+      if (['source_withdraw', 'excerpt'].includes(action.kind)) {
+        const source = state.selectedSource?.source;
+        if (!source || source.source_id !== action.target?.source_id || source.revision !== action.target?.revision) { publish({ action: null, preview: null }); return; }
+      }
+      if (['approve', 'correct'].includes(action.kind) && (!record || record.id !== action.target?.id || record.revision !== action.target?.revision)) { publish({ action: null }); return; }
+      return operation(async rpc => {
+        const routes = {
+          folder_create: ['chat_folders.create', {label:action.payload,expected_revision:action.target?.revision,expected_context:action.target?.context_key,confirm:true}],
+          folder_file: ['chat_folders.file', {folder_id:action.payload,expected_revision:action.target?.revision,expected_context:action.target?.context_key,confirm:true}],
+          folder_rename: ['chat_folders.rename', {folder_id:action.payload?.folder_id,label:action.payload?.label,expected_revision:action.target?.revision,expected_context:action.target?.context_key,confirm:true}],
+          folder_remove: ['chat_folders.remove', {folder_id:action.payload,expected_revision:action.target?.revision,expected_context:action.target?.context_key,confirm:true}],
+          folder_undo: ['chat_folders.undo', {expected_revision:action.target?.revision,expected_context:action.target?.context_key,confirm:true}],
+          import_copy: ['import.apply', { preview_token: preview?.preview_token, confirm: true }],
+          proposal_accept: ['curation.jobs.accept', { job_id: action.target?.job_id, proposal_index: action.target?.index, expected_revision: action.target?.revision, confirm: true }],
+          capture_settings: ['capture_settings.apply', { preview_token: preview?.preview_token, confirm: true }],
+          recall_settings: ['recall_settings.apply', { preview_token: preview?.preview_token, confirm: true }],
+          setup: ['setup', { confirm: true }],
+          create: ['create', action.payload],
+          source_capture: ['source.apply', { preview_token: preview?.preview_token, confirm: true }],
+          excerpt: ['excerpt.apply', { preview_token: preview?.preview_token, confirm: true }],
+          source_withdraw: ['source.withdraw', { source_id: action.target?.source_id, expected_revision: action.target?.revision, confirm: true }],
+          consent: ['consent.apply', { preview_token: preview?.preview_token, confirm: true }],
+          binding: ['workspace.project.apply', { preview_token: preview?.preview_token, confirm: true }],
+          approve: ['approve', { record_id: record?.id, expected_revision: record?.revision, confirm: true }],
+          correct: ['correct', { record_id: record?.id, expected_revision: record?.revision, changes: action.payload, confirm: true }],
+          delete: ['delete', { record_id: preview?.record_id, expected_revision: preview?.expected_revision,
+            preview_token: preview?.preview_token, confirm: true }],
+          restore: ['restore', { recovery_id: action.payload, confirm: true }],
+        };
+        const configured = routes[action.kind];
+        const route = configured && [configured[0], { ...configured[1] }]; if (!route) throw new Error('unsupported action');
+        if (lane === 'project' && ['create', 'approve', 'correct', 'delete', 'restore'].includes(action.kind)) {
+          route[1].expected_consent_revision = action.kind === 'delete' ? preview?.consent_revision : action.consentRevision;
+          if (!Number.isSafeInteger(route[1].expected_consent_revision)) throw new Error('Missing staged consent revision');
+        }
+        const result = await rpc(...route);
+        if (action.kind.startsWith('folder_')) return {folderStatus:result,notice:'Chat-folder metadata updated. Working directory, native projects and memory permissions are unchanged.'};
+        if (action.kind === 'import_copy') return { selectedImport: result.receipt, importReceipts: [], importNext: null, notice: result.already_imported ? 'This exact canonical batch was already copied. Receipt shown; no duplicate records created.' : 'Selected records copied as pending and sensitive. Originals unchanged. Receipt shown; separate record approval remains required.' };
+        if (action.kind === 'proposal_accept') return { acceptedProposal: { record_id: result.record.id, state: result.record.state, sensitive: result.record.sensitive }, selectedJob: null, curationJobs: [], curationJobsNext: null, notice: 'Proposal saved as pending, not approved. Refresh jobs and private records to reconcile. Sensitivity is preserved.' };
+        if (action.kind === 'capture_settings') return { captureSettings: result, notice: 'Local capture settings updated. No model egress, extraction or approval was enabled.' };
+        if (action.kind === 'recall_settings') return { recallSettings: result, notice: 'Recall settings updated. This does not approve records or select the native ELM memory provider.' };
+        if (action.kind === 'source_capture') return { lastSource: result, selectedSource: null, sources: [], sourceNext: null,
+          notice: 'Source snapshot saved. Refresh source snapshots to reconcile and reveal it. No record was extracted or approved.' };
+        if (action.kind === 'source_withdraw') return { selectedSource: null, sources: [], sourceNext: null, selected: null, records: [], next: null,
+          notice: 'Source withdrawal completed. Snapshot bytes remain retained. Refresh records and sources to inspect their state.' };
+        // Do not replay a mutation if a subsequent read fails. Human refresh reconciles.
+        return { selected: null, selectedSource: null, sources: [], sourceNext: null, records: [], trash: [], ready: false, initialized: null,
+          next: null, trashNext: null, projectStatus: null, projectKey: null, binding: null, notice: 'Action completed. Refresh to inspect the current records and trash.' };
+      }, true, !['consent', 'binding'].includes(action.kind));
+    },
+  };
+  return api;
 }
 
-function useImportant(controller) {
-  const s=useMemory(controller);
-  useLayoutEffect(()=>{if(s.phase === "idle")void controller.refresh();},[controller,s.ownerKey,s.phase]);
-  return s;
+const Button = SDK.Button || 'button', Input = SDK.Input || 'input', Textarea = SDK.Textarea || 'textarea';
+const sectionStyle = { paddingBlock: '1rem', borderTop: '1px solid var(--ui-stroke-secondary)' };
+const rowStyle = { display: 'flex', flexWrap: 'wrap', gap: '.75rem', alignItems: 'center' };
+const proseStyle = { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' };
+const button = (label, onClick, disabled = false) => h(Button, { type: 'button', variant: 'outline', disabled, onClick }, label);
+const evidenceKinds = {
+  reference: ['source_document'], explicit_fact: ['explicit_statement', 'source_document'],
+  preference: ['explicit_statement'], observation: ['direct_observation'], interpretation: ['inference'],
+  summary: ['source_document', 'inference'], procedure: ['source_document', 'inference'],
+};
+function SelectedImportForm({ controller, state: s }) {
+  const [text, setText] = useState(''), [declared, setDeclared] = useState(false);
+  const valid = declared && text && new TextEncoder().encode(text).length <= 65536;
+  return h('section', null,
+    h('label', null, 'Paste selected-record export JSON (maximum 64 KiB)', h(Textarea, { value: text, rows: 8, disabled: s.busy, onChange: e => setText(e.target.value) })),
+    h('p', null, 'Required format: elm-selected-records-v1 with 1–8 records; each has id, title, text and sources. Unsupported dependencies, record links and private snapshot references are rejected, not silently discarded.'),
+    h('label', null, h('input', { type: 'checkbox', checked: declared, disabled: s.busy, onChange: e => setDeclared(e.target.checked) }), 'I declare that I have the right to copy every supplied record. This declaration does not verify ownership or authorship.'),
+    button('Review exact selected-record copy', () => controller.previewImport(text, declared, s.ownerKey), s.busy || s.uncertain || !valid));
 }
-function ResultCard({result:r,controller,ownerKey,disabled,ctx,initialExpanded=false}) {
-  const [expanded,setExpanded]=useState(initialExpanded),[confirm,setConfirm]=useState(false),[copy,setCopy]=useState("");
-  useLayoutEffect(()=>{if(initialExpanded && r.status==="unread")void controller.mutate(r,"view",ownerKey);},[controller,ownerKey,r.id,initialExpanded]);
-  async function open(){setExpanded(v=>!v);if(!expanded && r.status==="unread")await controller.mutate(r,"view",ownerKey);}
-  return h("article",{style:{...section,borderTop:"1px solid var(--ui-stroke-secondary)",paddingTop:"1rem",minWidth:0}},
-    h("h2",{style:{fontSize:"1.1rem",fontWeight:600,margin:0}},r.title),
-    h("p",{style:{...muted,margin:0}},`${r.status === "unread" ? "Unread" : r.status === "viewed" ? "Viewed" : "Read · acknowledged by you"} · ${plain(r.kind)}${r.dismissed ? " · Dismissed" : ""}`),
-    h("div",{style:row},button(expanded?"Hide result":"View result",()=>void open(),disabled,{"aria-expanded":expanded}),
-      r.status!=="read" && button("Mark read",()=>void controller.mutate(r,"read",ownerKey),disabled),
-      button(r.dismissed?"Restore":"Dismiss",()=>void controller.mutate(r,r.dismissed?"restore":"dismiss",ownerKey),disabled),
-      button("Delete",()=>setConfirm(true),disabled)),
-    expanded && h("div",{style:{display:"grid",gap:"0.75rem",minWidth:0}},
-      h("div",{style:{whiteSpace:"pre-wrap",overflowWrap:"anywhere",lineHeight:1.65}},r.body),
-      button("Copy full result",async()=>{let ok=false;try{ok=await ctx?.os?.writeClipboard?.(r.body);}catch{}setCopy(ok?"Copied full result.":"Clipboard unavailable. Select the result text to copy it.");},disabled),
-      copy && h("p",{role:"status"},copy),
-      h("details",null,h("summary",null,"Saved result identity"),h("p",{style:muted},`Result ${r.id} · revision ${r.revision} · saved ${r.created_at}. Saved output is separate from the host transcript; deleting it does not erase chat history or earlier model context.`))),
-    confirm && h("section",{role:"group","aria-label":"Confirm result deletion",style:{display:"grid",gap:"0.75rem"}},
-      h("p",null,`Delete “${r.title}” from this chat’s saved results? This cannot be undone. The host transcript is unchanged.`),
-      h("div",{style:row},button("Confirm delete result",()=>void controller.mutate(r,"delete",ownerKey),disabled,{variant:"destructive"}),button("Keep result",()=>setConfirm(false),disabled))));
+function SelectedImportPanel({ controller, state: s }) {
+  return h('section', { style: sectionStyle }, h('h2', null, 'Reviewed copy from a supplied export'),
+    h('p', null, 'No legacy folders or global memory are browsed. Paste only the records you intend to copy. This is a declared copy, not verified ownership or automatic migration. Original data is not read, changed, overwritten or deleted.'),
+    h('p', null, 'New records are private to this authenticated chat, pending and sensitive. Old approval, scope and classification remain unverified metadata, not new authority. No project adoption or model call is performed. Only the exact ordered canonical batch is deduplicated; edited, subset or reordered exports can create duplicate copies.'),
+    h(SelectedImportForm, { key: s.ownerKey, controller, state: s }),
+    button('Refresh copy receipts', () => controller.refreshImports(null, s.ownerKey), s.busy),
+    h('ul', null, ...(s.importReceipts || []).map(receipt => h('li', { key: receipt.batch_id }, `${receipt.batch_id} · ${receipt.created_at} · ${receipt.record_ids.length} copied record(s) `,
+      button('Reveal copy receipt', () => controller.inspectImport(receipt.batch_id, s.ownerKey), s.busy)))),
+    s.importNext && button('Load more copy receipts', () => controller.refreshImports(s.importNext, s.ownerKey), s.busy),
+    s.selectedImport && h('section', null, h('h3', null, 'Copy receipt and original-to-new mapping'),
+      h('p', null, 'Original claims and new record IDs correspond by array index. A receipt records the copy, not current approval. After a lost response, inspect receipts rather than repeating the action.'),
+      h('pre', { style: proseStyle }, JSON.stringify(s.selectedImport, null, 2))));
 }
-function UpdatesSection({controller}) {
-  const s=useMemory(controller),[selected,setSelected]=useState([]),[review,setReview]=useState(false);
-  const chosen=s.rows.filter(r=>r.selectable && selected.includes(updateKey(r)));
-  return h("section",{style:section,"aria-label":"Optional updates"},
-    h("h2",null,"Updates"),
-    h("p",{style:muted},"Check hub-installed skills only when you ask. Plugin updates are disabled in this catalog build; use Hermes native plugin controls. Select exact skill targets below. Native-detected local edits are kept; scan cautions require native review. No new skill packs, forced updates, auto-update changes or plugin activation here."),
-    button("Check native updates",()=>{setSelected([]);setReview(false);void controller.check();},s.pending || s.phase==="unavailable"),
-    s.pending && h("p",{role:"status"},s.phase==="checking"?"Checking native update APIs…":"Applying only the confirmed selections…"),
-    s.error && h("p",{role:"alert"},s.error),
-    s.errors.map((e,i)=>h("p",{key:i,role:"alert"},`${e.type} check unavailable: ${e.message}. Unknown is not up to date.`)),
-    s.phase==="ready" && !s.rows.length && h("p",null,"No installed items returned by the available native checkers."),
-    s.rows.map(r=>h("div",{key:updateKey(r),style:{display:"grid",gap:"0.35rem",borderTop:"1px solid var(--ui-stroke-secondary)",paddingBlock:"0.75rem",minWidth:0}},
-      h("label",{style:row},h("input",{type:"checkbox",checked:chosen.some(x=>updateKey(x)===updateKey(r)),disabled:s.pending||s.unconfirmed||!r.selectable,
-        "aria-label":`Select ${r.type} ${r.name}`,onChange:e=>{const checked=e.target.checked;setReview(false);setSelected(old=>checked?[...old,updateKey(r)]:old.filter(k=>k!==updateKey(r)));}}),`${r.name} · ${r.type} · ${plain(r.status)}`),
-      h("p",{style:{...muted,margin:0}},`${r.source} · installed: ${r.current || "unknown"} → target: ${r.target || "unknown"}`),r.detail && h("p",{style:{margin:0}},r.detail))),
-    chosen.length>0 && button(`Review ${chosen.length} selected update${chosen.length===1?"":"s"}`,()=>setReview(true),s.pending||s.unconfirmed),
-    review && chosen.length>0 && h("section",{role:"group","aria-label":"Confirm selected native updates",style:section},
-      h("h3",null,"Apply these exact selections?"),h("ul",null,chosen.map(r=>h("li",{key:updateKey(r)},`${r.type} ${r.name}: ${r.current} → ${r.target}`))),
-      h("p",null,"Each installed skill target is independently read back. The batch stops on failure or an unknown outcome; remaining items are not retried."),
-      h("div",{style:row},button("Confirm selected updates",()=>{setReview(false);void controller.apply(chosen,s.ownerKey);},s.pending||s.unconfirmed),button("Cancel updates",()=>setReview(false),s.pending))),
-    s.outcomes.length>0 && h("ul",{"aria-label":"Update outcomes"},s.outcomes.map(o=>h("li",{key:o.key},`${o.key} · ${o.status}: ${o.detail}`))));
+export function historicalJobReceipt(job) {
+  const recipient = job?.recipient;
+  if (!recipient || typeof recipient !== 'object') return null;
+  const text = (value, limit) => typeof value === 'string' && value.length <= limit ? value : null;
+  return { provider: text(recipient.provider, 64), endpoint: text(recipient.endpoint, 2048), model: text(job.model, 128),
+    credential_mode: text(recipient.credential_mode, 64), credential_slot: text(recipient.credential_slot, 64),
+    credential_version: Number.isSafeInteger(recipient.credential_version) && recipient.credential_version > 0 ? recipient.credential_version : null,
+    payload_sha256: typeof job.payload_sha256 === 'string' && /^[a-f0-9]{64}$/.test(job.payload_sha256) ? job.payload_sha256 : null };
 }
-export function ImportantPage({controller,updates,ctx}) {
-  const s=useImportant(controller),d=s.data;
-  const disabled=s.pending||s.unconfirmed||s.phase!=="ready";
-  const detail=s.detail;
-  return h("main",{"aria-label":"Important results",style:{color:"var(--ui-text-primary)",fontSize:"0.9375rem",lineHeight:1.55,maxWidth:"62rem",width:"100%",height:"100%",overflowY:"auto",boxSizing:"border-box",marginInline:"auto",padding:"1.25rem",overflowWrap:"anywhere"}},
-    h("div",{style:row},h("h1",{style:{fontSize:"1.5rem",fontWeight:600}},"Important results"),button("Refresh results",()=>void controller.refresh(),s.pending||s.phase==="loading")),
-    h("p",{style:muted},"Saved assistant output for the focused chat. Important is not a user memory fact or proof the whole request is complete. Opening says Viewed; only Mark read records your acknowledgment. No forced scrolling or notifications."),
-    h("div",{role:"status","aria-live":"polite"},s.phase==="loading"?"Loading this chat’s results…":s.phase==="refreshing"?"Refreshing this chat’s results; the previous view remains visible…":s.notice),
-    s.error && h("p",{role:"alert"},s.error),
-    d && h("div",{key:s.ownerKey},
-      h("p",{style:muted},`${d.counts.unread} unread · ${d.counts.viewed} viewed · ${d.counts.read} read · ${d.counts.dismissed} dismissed. Chat ${d.context.session_id}.`),
-      h("section",{style:section,"aria-label":"Attention preferences"},
-        h("h2",null,"Attention"),
-        h(Choice,{label:"Important result attention",value:d.attention.mode,disabled,options:[{value:"quiet",label:"Quiet count only"},{value:"off",label:"Off · no unread count in status bar"}],onChange:mode=>void controller.setAttention({mode,updates_visible:d.attention.updates_visible},s.ownerKey)}),
-        h("label",{style:row},h("input",{type:"checkbox","aria-label":"Show dismissed results",checked:Boolean(s.showDismissed),disabled:s.pending,onChange:e=>void controller.refresh({showDismissed:e.target.checked})}),"Show dismissed results"),
-        h("label",{style:row},h("input",{type:"checkbox","aria-label":"Show update controls",checked:d.attention.updates_visible,disabled,onChange:e=>void controller.setAttention({mode:d.attention.mode,updates_visible:e.target.checked},s.ownerKey)}),"Show update controls")),
-      detail && h(ResultCard,{key:`detail:${detail.id}`,result:detail,controller,ownerKey:s.ownerKey,disabled,ctx,initialExpanded:true}),
-      !d.results.length && !detail && h("p",null,"No saved results in this view."),
-      d.results.filter(r=>r.id!==detail?.id).map(r=>h(ResultCard,{key:r.id,result:r,controller,ownerKey:s.ownerKey,disabled,ctx})),
-      d.next_cursor && button("Load older results",()=>void controller.more(),disabled),
-      d.attention.updates_visible && updates && h(UpdatesSection,{key:s.ownerKey,controller:updates})));
+function JobReceipt({ job }) {
+  const receipt = historicalJobReceipt(job);
+  return receipt && h('section', null, h('h4', null, 'Historical recipient receipt, not active configuration'),
+    h('p', null, 'Synthetic/local qualification only in this checkpoint. A receipt records the attempted destination; it does not prove delivery, actual provider model execution or an active production route. Slot/version are identifiers, never the credential itself.'),
+    h('pre', { style: proseStyle }, JSON.stringify(receipt, null, 2)));
 }
-function ImportantChip({controller}) {
-  const s=useImportant(controller),d=s.data;
-  return button(`Important${d?.attention.mode==="quiet"?` · ${d.counts.unread} unread`:""}`,()=>SDK.host.navigate('/elm-important'),false,{title:s.error||"Open saved results for the focused chat",variant:"ghost"});
+function CurationJobsPanel({ controller, state: s }) {
+  const job = s.selectedJob;
+  return h('section', { style: sectionStyle }, h('h2', null, 'Review retained extraction results'),
+    h('p', null, 'Production extraction remains unavailable. This checkpoint is qualified only with synthetic loopback tests; live dispatch is gated pending provider compatibility checks. A job marked attempted does not prove that a request was sent or an answer received.'),
+    h('p', null, 'Results and source-bound proposals are retained locally as plaintext; there is no result purge here. Inspection may reveal sensitive text. Accepting one proposal creates a pending record, never final approval or permission to send data.'),
+    button('Refresh retained jobs', () => controller.refreshJobs(null, s.ownerKey), s.busy),
+    !(s.curationJobs || []).length && h('p', null, 'No jobs loaded. Refresh to inspect available results; no example jobs are created.'),
+    h('ul', null, ...(s.curationJobs || []).map(item => h('li', { key: item.job_id }, `${item.job_id} · ${item.state} · revision ${item.revision} · ${item.proposal_count} proposal(s) `,
+      button('Reveal job proposals', () => controller.inspectJob(item.job_id, s.ownerKey), s.busy)))),
+    s.curationJobsNext && button('Load more retained jobs', () => controller.refreshJobs(s.curationJobsNext, s.ownerKey), s.busy),
+    s.acceptedProposal && h('p', { role: 'status' }, `Last accepted proposal: ${s.acceptedProposal.record_id} · ${s.acceptedProposal.state} · ${s.acceptedProposal.sensitive ? 'sensitive' : 'nonsensitive'}. Not approved.`),
+    job && h('section', null, h('h3', null, `Job ${job.job_id} · revision ${job.revision} · ${job.state}`), h(JobReceipt, { job }),
+      h('p', null, 'Untrusted model proposals: exact source references do not prove the proposed title or interpretation true. Source withdrawal or revision changes can block acceptance.'),
+      ...(job.proposals || []).map((proposal, index) => h('section', { key: index, style: sectionStyle }, h('h4', null, `Proposal ${index + 1}: ${proposal.title}`),
+        h('pre', { style: proseStyle }, JSON.stringify(proposal, null, 2)),
+        job.accepted_indexes.includes(index) ? h('p', null, 'Already accepted; inspect the record separately. Recorded ID: ', job.accepted_records?.[String(index)] || 'Refresh this job to reconcile the record ID.') : button('Review saving this proposal as pending', () => controller.stageProposal(index, s.ownerKey, job), s.busy || s.uncertain || job.state !== 'ready')))));
 }
-function ImportantDirective({attrs,controller,ctx}) {
-  const s=useImportant(controller),id=attrs?.id;
-  if(!resultId(id))return h("span",null,"Saved result reference is invalid.");
-  return h("aside",{style:{borderInlineStart:"2px solid var(--ui-stroke-secondary)",paddingInlineStart:"0.75rem",marginBlock:"0.75rem"}},
-    h("p",{style:muted},"Important · saved output, not a whole-task completion receipt"),
-    button("Open saved result in Important results",async()=>{if(await controller.openResult(id,s.ownerKey))SDK.host.navigate('/elm-important');},s.pending||!s.data),
-    s.notice && h("p",{role:"status"},s.notice),s.error && h("p",{role:"alert"},s.error));
+export function CurationPreviewForm({ controller, state: s }) {
+  const [ids, setIds] = useState('');
+  const [tokens,setTokens]=useState('512');
+  const requested=Number(tokens), validTokens=/^[0-9]+$/.test(tokens)&&Number.isInteger(requested)&&requested>=1&&requested<=512;
+  const edit=(update)=>{if(controller.currentKey()!==s.ownerKey||controller.getSnapshot()!==s||s.busy)return;if(s.organizerPreview)controller.cancelOrganizer(s.ownerKey,s.organizerPreview);update()};
+  const chosen = ids.split('\n').map(value => value.trim()).filter(Boolean);
+  const valid = chosen.length >= 1 && chosen.length <= 4 && new Set(chosen).size === chosen.length;
+  return h('div', null,
+    h('label', null, 'Exact private source IDs, one per line (1–4)', h(Textarea, { value: ids, rows: 4, disabled: s.busy, onChange: e => edit(()=>setIds(e.target.value)) })),
+    h('p', null, 'Explicitly revealing a payload can display complete sensitive source text here. Only active sources in this authenticated chat are eligible. This is local inspection, not consent to send.'),
+    button('Reveal exact local payload preview', () => controller.previewCuration(chosen, s.ownerKey, s.curationStatus), s.busy || !valid),
+    h('label',null,'Requested maximum output tokens (1–512)',h(Input,{type:'number',min:1,max:512,step:1,value:tokens,disabled:s.busy,onChange:e=>edit(()=>setTokens(e.target.value))})),
+    h('p',null,'This is a request to the provider, not a measured token count, provider-compliance guarantee or billing limit. Editing sources or this request discards the prepared preview.'),
+    button('Prepare exact organizer payload (not sent)',()=>controller.prepareOrganizer(chosen,s.ownerKey,requested),s.busy||!valid||!validTokens));
 }
-
-// Private creation/defaults: separate from normal host creation and memory facts.
-// Human-only processing: snapshot the native live chat route, never the global
-// auxiliary default. The backend rechecks source, identity and host trust gates.
-export async function requestChatModelDraft(controller,data,scope,recordIds,kind,host=SDK.host){
-  const before=controller.getSnapshot(),owner=productIdentity(host),runtime=value(host?.state?.focusedSessionId);
-  const ids=[...recordIds];
-  if(before.data!==data||owner.error||owner.session!==data.context?.session_id||scope.id!==data.selected_scope_id||typeof runtime!=="string"||!runtime)return false;
-  let options;
-  try{options=await host.request("model.options",{session_id:runtime,explicit_only:true,include_unconfigured:false,refresh:false});}
-  catch{host.notify?.({kind:"error",message:"Current chat model could not be verified; no draft was requested."});return false;}
-  const now=controller.getSnapshot();
-  if(now.ownerKey!==before.ownerKey||now.data!==data||productIdentity(host).key!==owner.key||value(host?.state?.focusedSessionId)!==runtime)return false;
-  const provider=options?.provider,model=options?.model;
-  if(typeof provider!=="string"||!provider||typeof model!=="string"||!model||!options.providers?.some(p=>p.slug===provider&&p.authenticated===true&&p.models?.includes(model)&&!p.unavailable_models?.includes(model))){
-    host.notify?.({kind:"error",message:"The current model is not in the verified native inventory; no draft was requested."});return false;
+function OrganizerPreview({controller,state:s}) {
+  const p=s.organizerPreview;
+  const [accepted,setAccepted]=useState(false);
+  return h('section',{style:sectionStyle},h('h3',null,'Prepared organizer payload · NOT SENT'),
+    h('p',null,p.production_dispatch_supported?'Sending transmits the complete payload below to the exact recipient. Price is unknown; limits are NOT a monetary spending cap. Provider API compatibility has not been certified.':'This host cannot send organizer requests. Nothing was sent.'),
+    h('p',null,'This preview expires after 300 seconds. The reserved job ID is not a completed job or proof of a request: ',p.job_id),
+    h('p',null,'Requested maximum output tokens: ',String(p.max_output_tokens),'. Provider compliance and billed usage are not guaranteed. Input token count and price are unknown.'),
+    h('p',null,'Local transport limits: outbound body ',String(p.budget.outbound_body_bytes),' / 32768 bytes; response body at most 8192 bytes. Bytes are not tokens. Socket timeout: 10 seconds, NOT an absolute end-to-end deadline. No monetary limit is enforced.'),
+    h('h4',null,'Exact recipient and nonsecret credential binding'),h('pre',{style:proseStyle},JSON.stringify(p.recipient,null,2)),
+    h('h4',null,'Selected source pins and sensitivity'),h('pre',{style:proseStyle},JSON.stringify(p.source_pins,null,2)),
+    h('p',null,'Payload SHA-256: ',p.payload_sha256),
+    h('h4',null,'Full prepared payload including model (untrusted text)'),h('pre',{style:proseStyle},JSON.stringify(p.egress_payload,null,2)),
+    h('label',null,h('input',{type:'checkbox',checked:accepted,disabled:s.busy||!p.production_dispatch_supported,onChange:e=>setAccepted(e.target.checked)}),' I approve sending this complete payload, including any sensitive source data, to the displayed recipient and accept unknown provider charges without an enforced monetary cap.'),
+    button('Send reviewed payload once',()=>controller.executeOrganizer(accepted,s.ownerKey,p),s.busy||s.uncertain||!accepted||!p.production_dispatch_supported),
+    button('Cancel prepared organizer preview',()=>controller.cancelOrganizer(s.ownerKey,p),s.busy));
+}
+function CurationPanel({ controller, state: s }) {
+  return h('section', { style: sectionStyle }, h('h2', null, 'Reviewed memory organizer'),
+    h('p', null, 'A supported native host can enroll a dedicated organizer credential and prepare an exact route-bound payload when the saved organizer preference matches. Review the complete payload and recipient before a separate send confirmation. This integration has local synthetic tests, not real-provider qualification.'),
+    h('p', null, 'Saved preferences alone never authorize sending. Search-agent execution is not implemented. The organizer only processes the sources you explicitly select.'),
+    h('p', null, 'Local capture and recall settings are not external-processing consent. Organizer sends may incur charges. Each result is retained for review; accepting a proposal creates pending memory, not automatically trusted memory.'),
+    button('Check extraction availability', () => controller.refreshCuration(s.ownerKey), s.busy),
+    s.curationStatus && h('div', null, h('p', null, 'Unavailable reason: ', s.curationStatus.reason),
+      h('p', null, s.curationStatus.notice), h('pre', { style: proseStyle }, JSON.stringify(s.curationStatus.limits, null, 2)),
+      h(CurationPreviewForm, { key: s.ownerKey, controller, state: s })),
+    s.organizerPreview && h(OrganizerPreview,{key:s.organizerPreview.preview_token,controller,state:s}),
+    s.curationPreview && h('section', { style: sectionStyle }, h('h3', null, 'Local-only exact outbound-payload inspection'),
+      h('p', null, 'NOT SENT. Destination unresolved. No grant, extraction job or proposal has been created.'),
+      h('p', null, s.curationPreview.notice),
+      h('p', null, 'Serialized payload bytes: ', String(s.curationPreview.utf8_bytes), '. Bytes are not tokens or a price estimate.'),
+      h('p', null, 'Payload SHA-256: ', h('code', null, s.curationPreview.payload_sha256)),
+      h('h4', null, 'Selected source provenance and sensitivity'), h('pre', { style: proseStyle }, JSON.stringify(s.curationPreview.source_summaries, null, 2)),
+      h('h4', null, 'Full exact proposed payload (untrusted text, not instructions)'), h('pre', { style: proseStyle }, JSON.stringify(s.curationPreview.egress_payload, null, 2))));
+}
+function ConversationCaptureForm({ controller, state }) {
+  const current = state.captureSettings;
+  const [enabled, setEnabled] = useState(current.enabled === true);
+  const [turns, setTurns] = useState(current.max_turns ?? 8);
+  const [bytes, setBytes] = useState(current.max_utf8_bytes ?? 16384);
+  const disabled = state.busy || state.uncertain;
+  return h('div', null,
+    h('p', null, `Stored capture: ${current.enabled ? 'enabled' : 'disabled'} · revision ${current.revision}. Host capability: ${current.host_supported ? 'available' : 'unavailable'}.`),
+    h('p', null, `Captured turns: ${current.captured_turns}; remaining turn allowance: ${current.remaining_turns}. Shared source or manifest capacity can stop capture sooner. Stored enabled is not proof a turn was captured.`),
+    current.capacity_reason && h('p', { role: 'status' }, 'Capture capacity status: ', current.capacity_reason),
+    h('p', null, current.notice),
+    h('label', null, h('input', { type: 'checkbox', checked: enabled, disabled: disabled || !current.host_supported, onChange: e => setEnabled(e.target.checked) }), 'Enable local conversation capture'),
+    h('label', null, 'Retained turn cap (1–32)', h(Input, { type: 'number', min: 1, max: 32, value: turns, disabled, onChange: e => setTurns(Number(e.target.value)) })),
+    h('label', null, 'Combined redacted user + assistant UTF-8 bytes per turn (2048–32768)', h(Input, { type: 'number', min: 2048, max: 32768, value: bytes, disabled, onChange: e => setBytes(Number(e.target.value)) })),
+    button('Review local capture settings', () => controller.previewCaptureSettings({ enabled, max_turns: turns, max_utf8_bytes: bytes }, state.ownerKey, current), disabled),
+    current.enabled && button('Review disabling local capture', () => controller.previewCaptureSettings({ enabled: false, max_turns: current.max_turns, max_utf8_bytes: current.max_utf8_bytes }, state.ownerKey, current), disabled));
+}
+function ConversationCapturePanel({ controller, state: s }) {
+  return h('section', { style: sectionStyle }, h('h2', null, 'Optional local conversation capture'),
+    h('p', null, 'Separate local-storage consent, off by default. This does not authorize sending captured text to a model, enable recall, extract records or approve anything. No external model or paid API call is made by capture controls.'),
+    h('p', null, 'Only qualified future native turns are captured. Enabling or changing settings excludes already queued or in-flight admissions. Captured user and assistant snapshots are forced sensitive. Native text is secret-redacted, not a complete transcript or proof of delivery.'),
+    h('p', null, 'The cap stops new capture; it does not expire or erase old text. Withdrawn snapshots still count and retain bytes. Disabling affects future capture, not existing snapshots, outputs, transcripts or backups. There is no rolling retention or permanent purge here.'),
+    button('Refresh local capture settings', () => controller.refreshCaptureSettings(s.ownerKey), s.busy),
+    s.captureSettings && h(ConversationCaptureForm, { key: s.ownerKey + ':' + s.captureSettings.revision, controller, state: s }),
+    button('Refresh captured turns', () => controller.refreshCapturedTurns(null, s.ownerKey), s.busy),
+    h('ul', null, ...(s.capturedTurns || []).map(turn => h('li', { key: turn.capture_id },
+      h('p', null, `${turn.capture_id} · ${turn.created_at} · ${turn.phase}`),
+      h('p', null, `User: ${turn.user_utf8_bytes} bytes; assistant: ${turn.assistant_utf8_bytes} bytes. Finalized before delivery is not a delivery receipt.`),
+      button('Reveal captured user source', () => controller.inspectSource(turn.user_source_id, s.ownerKey), s.busy || !s.initialized),
+      button('Reveal captured assistant source', () => controller.inspectSource(turn.assistant_source_id, s.ownerKey), s.busy || !s.initialized)))),
+    s.captureNext && button('Load more captured turns', () => controller.refreshCapturedTurns(s.captureNext, s.ownerKey), s.busy),
+    h('p', null, 'First refresh the private review at the top to verify the initialized store. Revealed text then appears in Private source snapshots above, with native role/admission metadata. Exact excerpts require separate review and remain pending and sensitive; withdrawal is not erasure.'));
+}
+function RecallSettingsForm({ controller, state }) {
+  const current = state.recallSettings;
+  const [enabled, setEnabled] = useState(current.enabled === true);
+  const [records, setRecords] = useState(current.max_records ?? 4);
+  const [bytes, setBytes] = useState(current.max_utf8_bytes ?? 8192);
+  const disabled = state.busy || state.uncertain;
+  return h('div', null,
+    h('p', null, `Saved setting: ${current.enabled ? 'enabled' : 'disabled'} · revision ${current.revision}. Host capability: ${current.host_supported ? 'available' : 'unavailable'}. Stored settings do not prove active injection.`),
+    h('p', null, current.notice),
+    h('label', null, h('input', { type: 'checkbox', checked: enabled, disabled: disabled || !current.host_supported, onChange: e => setEnabled(e.target.checked) }), 'Enable private-chat automatic recall'),
+    h('label', null, 'Maximum records (1–8)', h(Input, { type: 'number', min: 1, max: 8, value: records, disabled, onChange: e => setRecords(Number(e.target.value)) })),
+    h('label', null, 'Maximum UTF-8 bytes (512–16384)', h(Input, { type: 'number', min: 512, max: 16384, value: bytes, disabled, onChange: e => setBytes(Number(e.target.value)) })),
+    button('Review recall settings', () => controller.previewRecall({ enabled, max_records: records, max_utf8_bytes: bytes }, state.ownerKey, current), disabled),
+    current.enabled && button('Review disabling recall', () => controller.previewRecall({ enabled: false, max_records: current.max_records, max_utf8_bytes: current.max_utf8_bytes }, state.ownerKey, current), disabled));
+}
+function RecallSettingsPanel({ controller, state }) {
+  return h('section', { style: sectionStyle }, h('h2', null, 'Optional private-chat automatic recall'),
+    h('p', null, 'Off by default. Requires explicit private setup, an approving human, a supported host, and separate native ELM provider selection. Project automatic recall is not supported.'),
+    h('p', null, 'Requires the patched host, ELM selected as native provider, the supported primary ChatCompletions api_mode, a known context window and an explicit positive max_tokens output cap. With the default unset max_tokens, recall is safely omitted even when saved as enabled. These controls do not change provider or output settings.'),
+    h('p', null, 'Uses the newest approved, nonsensitive private records, not semantic search. No retrieval model or API calls are made, but memory added to an existing paid chat can increase input costs. UTF-8 bytes are not tokens.'),
+    h('p', null, 'Disabling blocks future request builds, not requests already dispatched, provider retries, prior output, transcripts or logs. An archived or deleted selected project may require explicit unbinding before these settings can be read or changed.'),
+    button('Refresh recall settings', () => controller.refreshRecall(state.ownerKey), state.busy),
+    state.recallSettings && h(RecallSettingsForm, { key: state.ownerKey + ':' + state.recallSettings.revision, controller, state }));
+}
+function CreateRecordForm({ controller, disabled, ownerKey, project, projectKey: renderedProjectKey }) {
+  const [title, setTitle] = useState(''), [text, setText] = useState('');
+  const [reference, setReference] = useState(''), [quote, setQuote] = useState('');
+  const [domain, setDomain] = useState('work'), [kind, setKind] = useState('reference');
+  const [basis, setBasis] = useState('source_document'), [topic, setTopic] = useState('facts');
+  const [sensitive, setSensitive] = useState(false);
+  const sourceAllowed = manualSourceAllowed(reference, project);
+  const valid = sourceAllowed && title.trim() && text.trim() && reference.trim() && topic.trim() &&
+    new TextEncoder().encode(title).length <= 512 && new TextEncoder().encode(text).length <= 8192 &&
+    !(domain === 'user' && sensitive && basis !== 'explicit_statement');
+  const field = (label, value, change, maxLength) => h('label', null, label, h(Input, { value, maxLength, disabled, onChange: e => change(e.target.value) }));
+  const select = (label, value, options, change) => h('label', null, label, h('select', { value, disabled, onChange: e => change(e.target.value) },
+    ...options.map(option => h('option', { key: option, value: option }, option))));
+  function review() {
+    const source = { ref: reference }; if (quote) source.quote = quote;
+    controller.stage('create', { title, text, sources: [source], domain, kind, basis, topic, sensitive }, ownerKey, null, renderedProjectKey);
   }
-  return controller.action("/draft","POST",{scope_id:scope.id,record_ids:ids,kind,session_id:owner.session,model_route:{provider,model}},"Generate pending draft");
+  return h('details', { style: sectionStyle }, h('summary', null, 'Add a pending record manually'),
+    h('p', null, project ? 'This record goes into the currently consented project pool, not your private chat. It may later be reviewed by independently consenting chats of this principal.' : 'This record stays in this authenticated private chat. No project sharing is enabled.'),
+    field('Title', title, setTitle, 512), h('label', null, 'Record text', h(Textarea, { value: text, rows: 5, maxLength: 8192, disabled, onChange: e => setText(e.target.value) })),
+    field('Declared source reference (not fetched)', reference, setReference, 2048),
+    !sourceAllowed && h('p', { role: 'alert' }, 'Private elm-snapshot-v1 references are not project source authority. This form does not copy private snapshots into projects.'),
+    h('label', null, 'Optional declared source quote', h(Textarea, { value: quote, rows: 3, maxLength: 4000, disabled, onChange: e => setQuote(e.target.value) })),
+    h('div', { style: rowStyle }, select('Domain', domain, ['user', 'work', 'reference'], setDomain),
+      select('Evidence kind', kind, Object.keys(evidenceKinds), value => { setKind(value); setBasis(evidenceKinds[value][0]); }),
+      select('Evidence basis', basis, evidenceKinds[kind], setBasis)),
+    field('Topic', topic, setTopic, 128), h('label', null, h('input', { type: 'checkbox', checked: sensitive, disabled, onChange: e => setSensitive(e.target.checked) }), ' Sensitive: exclude from model recall'),
+    h('p', null, 'A manually entered reference or quote is not verified. No URL is fetched. Sensitive user facts require explicit-statement evidence. Storage byte limits are checked again by the backend.'),
+    button('Review new pending record', review, disabled || !valid));
+}
+function SourceCaptureForm({ controller, ownerKey, disabled }) {
+  const [title, setTitle] = useState(''), [text, setText] = useState(''), [reference, setReference] = useState(''), [author, setAuthor] = useState('');
+  const [sensitive, setSensitive] = useState(true);
+  const bytes = value => new TextEncoder().encode(value).length;
+  const valid = title.trim() && text.length > 0 && bytes(title) <= 512 && bytes(text) <= 65536 && bytes(reference) <= 2048 && bytes(author) <= 512;
+  const field = (label, value, change, maxLength) => h('label', null, label, h(Input, { value, maxLength, disabled, onChange: e => change(e.target.value) }));
+  return h('details', null, h('summary', null, 'Capture pasted source text'),
+    h('p', null, 'Private chat only. Store an exact snapshot of text you supply; no URL or file is fetched and no AI extraction runs.'),
+    field('Snapshot title', title, setTitle, 512),
+    h('label', null, 'Exact source text (up to 64 KiB UTF-8)', h(Textarea, { value: text, rows: 8, maxLength: 65536, disabled, onChange: e => setText(e.target.value) })),
+    field('Optional declared reference (not fetched)', reference, setReference, 2048), field('Optional declared author (not verified)', author, setAuthor, 512),
+    h('label', null, h('input', { type: 'checkbox', checked: sensitive, disabled, onChange: e => setSensitive(e.target.checked) }), ' Sensitive source — inherited by extracted records'),
+    h('p', null, 'Sensitive is on by default. This is your declaration, not an automated privacy detector. Exact excerpts inherit the flag; record approval does not remove recall exclusions.'),
+    button('Preview source snapshot', () => controller.previewSource({ title, text, reference, author, sensitive }, ownerKey), disabled || !valid));
+}
+function ExcerptForm({ source, controller, ownerKey, disabled }) {
+  const [quote, setQuote] = useState(''), [occurrence, setOccurrence] = useState(''), [title, setTitle] = useState('');
+  const number = Number(occurrence), validOccurrence = occurrence === '' || Number.isSafeInteger(number) && number >= 1;
+  const valid = quote.length > 0 && new TextEncoder().encode(quote).length <= 8192 && new TextEncoder().encode(title).length <= 512 && validOccurrence;
+  function preview() {
+    const payload = { quote }; if (title) payload.title = title; if (occurrence !== '') payload.occurrence = number;
+    controller.previewExcerpt(payload, ownerKey, source);
+  }
+  return h('section', { style: sectionStyle }, h('h3', null, 'Review an exact excerpt'),
+    h('label', null, 'Exact quote (not trimmed or normalized)', h(Textarea, { value: quote, rows: 4, maxLength: 8192, disabled, onChange: e => setQuote(e.target.value) })),
+    h('label', null, 'Occurrence, starting at 1 (blank requires a unique match)', h(Input, { value: occurrence, type: 'number', min: 1, step: 1, disabled, onChange: e => setOccurrence(e.target.value) })),
+    h('label', null, 'Optional record title', h(Input, { value: title, maxLength: 512, disabled, onChange: e => setTitle(e.target.value) })),
+    h('p', null, 'The backend finds the exact quote and reports Unicode code-point offsets. The browser never calculates or submits character offsets. Ambiguous matches require an explicit occurrence.'),
+    button('Preview exact excerpt', preview, disabled || !valid));
+}
+function SourcePanel({ state: s, controller, disabled }) {
+  const source = s.selectedSource?.source;
+  return h('section', { style: sectionStyle, 'aria-label': 'Private source snapshots' }, h('h2', null, 'Private source snapshots'),
+    h('p', null, 'Captured-text identity is not factual truth, verified authorship, or project sharing. Withdrawal retains snapshot bytes; no permanent source purge is provided.'),
+    s.lastSource && h('p', { role: 'status' }, 'Last saved source: ', h('code', null, s.lastSource.source_id)),
+    button('Refresh source snapshots', () => controller.refreshSources(null, s.ownerKey), s.busy),
+    h('ul', null, ...(s.sources || []).map(item => h('li', { key: item.source_id }, `${item.title} · ${item.state} · revision ${item.revision} · ${item.sensitive ? 'sensitive' : 'declared non-sensitive'} `,
+      button('Reveal source snapshot', () => controller.inspectSource(item.source_id, s.ownerKey), s.busy)))),
+    s.sourceNext && button('Load more source snapshots', () => controller.refreshSources(s.sourceNext, s.ownerKey), s.busy),
+    h(SourceCaptureForm, { key: s.ownerKey, controller, ownerKey: s.ownerKey, disabled }),
+    source && h('section', { key: source.source_id + ':' + source.revision, style: sectionStyle },
+      h('h3', null, source.title), h('p', null, `${source.state} · revision ${source.revision} · ${source.sensitive ? 'sensitive' : 'declared non-sensitive'}`),
+      source.native_capture && h('div', null, h('h4', null, 'Native capture receipt (not verified delivery)'), h('pre', { style: proseStyle }, JSON.stringify(source.native_capture, null, 2))),
+      h('p', null, 'SHA-256: ', h('code', null, source.sha256)), h('pre', { style: proseStyle }, source.text),
+      h('details', null, h('summary', null, 'Complete captured source metadata'), h('pre', { style: proseStyle }, JSON.stringify(source, null, 2))),
+      source.state === 'active' && h(ExcerptForm, { source, controller, ownerKey: s.ownerKey, disabled }),
+      source.state === 'active' && button('Review source withdrawal', () => controller.stage('source_withdraw', null, s.ownerKey, source), disabled)));
+}
+function RecordEditor({ record, controller, disabled, ownerKey, projectKey: renderedProjectKey }) {
+  const [title, setTitle] = useState(record.title), [text, setText] = useState(record.text);
+  return h('section', { style: sectionStyle }, h('h3', null, 'Propose a correction'),
+    h('label', null, 'Title', h(Input, { value: title, maxLength: 512, disabled, onChange: e => setTitle(e.target.value) })),
+    h('label', null, 'Text', h(Textarea, { value: text, rows: 6, maxLength: 8192, disabled, onChange: e => setText(e.target.value) })),
+    h('p', null, 'Correction replaces the current text, returns this record to pending, and invalidates dependent evidence. No version history is retained.'),
+    button('Review correction', () => controller.stage('correct', { title, text }, ownerKey, record, renderedProjectKey), disabled || !title.trim() || !text.trim()));
+}
+function RecordDetail({ detail, controller, disabled, ownerKey, projectKey: renderedProjectKey }) {
+  const r = detail.record;
+  return h('section', { style: sectionStyle, 'aria-label': 'Selected memory record' },
+    h('h2', null, r.title), h('p', null, `${r.state} · revision ${r.revision} · ${r.domain} / ${r.kind}`),
+    r.sensitive && h('p', null, 'Sensitive record: visible for your review, excluded from model recall.'),
+    h('p', null, detail.recall_eligible ? 'Eligible for explicit recall in this reviewed scope.' : 'Not eligible for model recall.'),
+    h('p', { style: proseStyle }, r.text), h('h3', null, 'Declared sources'),
+    h('ul', null, ...r.sources.map((source, index) => h('li', { key: index, style: proseStyle },
+      h('code', null, source.ref), source.quote && h('blockquote', null, source.quote),
+      source.sha256 && h('p', null, 'SHA-256: ', h('code', null, source.sha256)),
+      source.revision != null && h('p', null, 'Source revision: ' + source.revision)))),
+    h('details', null, h('summary', null, 'Full record and provenance metadata'),
+      h('pre', { style: proseStyle }, JSON.stringify(r, null, 2))),
+    h('p', null, 'Sources are displayed as text. They are not executed or opened automatically.'),
+    h('div', { style: rowStyle }, r.state === 'pending' && button('Review approval', () => controller.stage('approve', null, ownerKey, r, renderedProjectKey), disabled),
+      button('Preview deletion', () => controller.previewDelete(ownerKey, r), disabled)),
+    h(RecordEditor, { key: r.id + ':' + r.revision, record: r, controller, disabled, ownerKey, projectKey: renderedProjectKey }));
+}
+function Confirmation({ state, controller }) {
+  const kind = state.action.kind, detail = state.selected?.record;
+  const descriptions = {
+    folder_create: 'Create this metadata-only chat folder? Creating a folder does not file the current chat.',
+    folder_file: 'Change only the current chat’s folder membership? Working directory, native project and memory permissions stay unchanged.',
+    folder_rename: 'Rename this metadata-only chat folder for your chats? Membership, working directories and memory permissions remain unchanged. This clears the prior filing undo.',
+    folder_remove: 'Remove this empty folder label? No chats or messages are deleted. Any saved membership, including one not currently visible, blocks removal. The same label can be created again; prior filing undo is cleared.',
+    folder_undo: 'Undo the latest filing change only if its reviewed revision still matches? Intervening changes refuse; no previous state is forced.',
+    import_copy: 'Copy this exact reviewed batch into the current private chat as new pending, sensitive records? Original claims are unverified. No originals are changed or overwritten; this does not approve records.',
+    proposal_accept: 'Save this exact source-bound proposal as a pending private record? It remains unapproved and preserves source sensitivity. This is not external-processing consent.',
+    capture_settings: 'Change local-storage consent for this private chat? Review the capture caps. No model egress, recall or automatic approval is authorized.',
+    recall_settings: 'Change automatic recall for this private chat? Review the server settings and limits. No record is approved and no native provider is selected by this action.',
+    source_capture: 'Retain this exact pasted source snapshot in the current private chat? Bytes are stored locally; no URL is fetched, no record is extracted, and nothing is approved.',
+    excerpt: 'Create the exact reviewed excerpt as a pending private record? The hash and quote establish captured-text identity, not truth or authorship. No approval or project sharing is performed.',
+    source_withdraw: 'Withdraw this snapshot from future extraction and invalidate linked evidence? Source bytes remain retained; this is not erasure.',
+    create: 'Save this manually authored record as pending? It will not be approved or recalled automatically. Source labels are declared provenance, not independently verified evidence.',
+    setup: 'Create a fresh private store for this authenticated principal. No legacy data will be adopted.',
+    approve: `Approve revision ${detail?.revision} of “${detail?.title}”? Sensitive and inferred-user exclusions still apply.`,
+    correct: 'Save this correction as pending? The previous text is replaced; dependent evidence is invalidated.',
+    delete: 'Remove these records from recall? Full bodies remain in private trash indefinitely. This is NOT permanent erasure.',
+    restore: 'Restore this retained group as pending? No approvals are restored. Dependencies may need later repair.',
+    consent: 'Change this chat’s project memory permissions? Review the exact project and permissions below.',
+    binding: 'Change this chat’s explicit ELM project binding? This does not grant project memory access.',
+  };
+  return h('section', { style: sectionStyle, 'aria-label': 'Confirm memory change' }, h('h2', null, 'Review before changing memory'),
+    h('p', null, descriptions[kind]),
+    ['recall_settings', 'capture_settings'].includes(kind) && h('div', null, h('pre', { style: proseStyle }, JSON.stringify(state.preview?.settings, null, 2)), h('p', null, state.preview?.notice)),
+    kind.startsWith('folder_') && h('div', null,h('p',null,`Current chat: ${state.action.target.current_session_id}; reviewed revision ${state.action.target.revision}`),h('p',null,`Selection: ${state.action.label ?? 'Latest reversible filing'}`)),
+    kind === 'import_copy' && h('div', null, h('h3', null, 'Exact supplied export'), h('pre', { style: proseStyle }, state.action.payload.export_text), h('h3', null, 'Destination, source hashes, original claims and full normalized candidates'), h('pre', { style: proseStyle }, JSON.stringify({ destination: state.preview?.destination, batch_id: state.preview?.batch_id, export_sha256: state.preview?.export_sha256, canonical_sha256: state.preview?.canonical_sha256, original_claims: state.preview?.original_claims, candidates: state.preview?.candidates, already_imported: state.preview?.already_imported, existing_receipt: state.preview?.existing_receipt }, null, 2)), h('p', null, state.preview?.notice)),
+    kind === 'proposal_accept' && h('div', null, h('p', null, `Job ${state.action.target.job_id}, revision ${state.action.target.revision}, proposal ${state.action.target.index + 1}`), h('pre', { style: proseStyle }, JSON.stringify(state.action.payload, null, 2))),
+    kind === 'create' && h('pre', { style: proseStyle }, JSON.stringify(state.action.payload, null, 2)),
+    kind === 'source_capture' && h('div', null, h('h3', null, state.action.payload.title), h('pre', { style: proseStyle }, state.action.payload.text),
+      h('p', null, 'Declared reference: ' + state.action.payload.reference), h('p', null, 'Declared author: ' + state.action.payload.author),
+      h('p', null, 'Sensitive snapshot: ' + (state.action.payload.sensitive !== false ? 'yes' : 'declared non-sensitive'))),
+    kind === 'source_withdraw' && h('div', null, h('p', null, state.action.target.title),
+      h('p', null, `Source ${state.action.target.source_id}, revision ${state.action.target.revision}`), h('code', null, state.action.target.sha256)), kind === 'correct' && h('div', null, h('strong', null, state.action.payload.title), h('blockquote', { style: proseStyle }, state.action.payload.text)),
+    state.preview && ['source_capture', 'excerpt'].includes(kind) && h('div', null,
+      h('p', null, state.preview.notice), h('p', null, 'Captured SHA-256: ', h('code', null, state.preview.sha256)),
+      kind === 'source_capture' && h('p', null, `${state.preview.utf8_bytes} UTF-8 bytes; ${state.preview.codepoints} Unicode code points`),
+      kind === 'excerpt' && h('div', null, h('p', null, `Source ${state.preview.source_id}, revision ${state.preview.source_revision}; occurrence ${state.preview.occurrence}; ${state.preview.offset_unit} offsets ${state.preview.start}–${state.preview.end}`),
+        h('pre', { style: proseStyle }, JSON.stringify(state.preview.candidate, null, 2)), h('blockquote', { style: proseStyle }, state.preview.quote))),
+    state.preview?.affected_record_ids && h('div', null, h('p', null, `${state.preview.affected_record_ids.length} record(s) affected. ${state.preview.notice}`),
+      h('details', null, h('summary', null, 'Affected record IDs'), h('pre', { style: proseStyle }, state.preview.affected_record_ids.join('\n')))),
+    state.preview && ['consent', 'binding'].includes(kind) && h('div', null,
+      kind === 'binding' && h('p', null, 'Current binding: ' + (state.preview.current_project_id ?? 'none')),
+      h('p', null, 'Target project: ' + (state.preview.target_project_id ?? 'none')),
+      h('p', null, state.preview.notice),
+      state.preview.consent_revision != null && h('p', null, 'Consent revision: ' + state.preview.consent_revision),
+      state.preview.initializes_store && h('p', null, 'This explicit grant creates a fresh project store. No existing private or legacy data is imported.')),
+    h('div', { style: rowStyle }, button('Confirm ' + kind, () => controller.confirm(state.action), state.busy), button('Cancel', () => controller.cancel(), state.busy)));
+}
+function ProjectControls({ state: s, controller, disabled }) {
+  const [projectId, setProjectId] = useState('');
+  const status = s.projectStatus, binding = s.binding;
+  return h('section', { style: sectionStyle, 'aria-label': 'Project binding and consent' },
+    h('h2', null, 'Exact binding and consent'),
+    h('p', null, 'Native sidebar project placement does not grant ELM access. A separate exact binding and explicit consent are required.'),
+    h('p', null, 'Selected ELM project: ', h('code', null, binding?.selected_project_id ?? 'none / not checked')),
+    binding && h('p', null, 'Binding revision: ' + binding.project_binding_revision),
+    status && h('p', null, `Stored consent: ${status.consent_granted ? 'granted' : 'revoked'} · revision ${status.consent_revision} · policy ${status.consent_version ?? 'unavailable'}`),
+    status && h('p', null, 'Effective project access: ' + (status.project_read_authorized ? 'authorized for the reported policy' : 'not authorized')),
+    status?.reconsent_required && h('p', null, 'Your older consent does not allow human inspection or editing. Review the new permissions before continuing.'),
+    h('div', { style: rowStyle },
+      button('Preview project consent', () => controller.previewConsent('grant', s.ownerKey), disabled || !binding?.selected_project_id || !status),
+      button('Preview revoke consent', () => controller.previewConsent('revoke', s.ownerKey), disabled || !status)),
+    h('p', null, 'Opted-in chats of this same principal share a project pool. New consent includes inspection of pending and sensitive records and editing/deleting/restoring contributions from those chats. Revocation stops this chat’s access; it does not erase contributions.'),
+    h('details', null, h('summary', null, 'Change the explicit ELM binding'),
+      h('p', null, 'Use an existing exact Hermes project ID. No project is created or selected automatically. Archived/deleted bindings must be explicitly cleared before consent can be inspected or revoked.'),
+      h('label', null, 'Existing project ID', h(Input, { value: projectId, maxLength: 256, disabled, onChange: e => setProjectId(e.target.value) })),
+      button('Preview exact binding', () => controller.previewBinding(projectId, s.ownerKey), disabled || !projectId.trim() || projectId !== projectId.trim()),
+      button('Preview unbind', () => controller.previewBinding(null, s.ownerKey), disabled || !binding?.selected_project_id),
+      h('p', null, 'Unbind and revoke are separate confirmations. After unbinding, refresh and review revoke. Existing project records stay retained.')));
+}
+export function ReviewPage({ controller, project = false }) {
+  const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+  const activation = SDK.useGatewayActivationEpoch ? SDK.useGatewayActivationEpoch() : 0;
+  useLayoutEffect(() => { controller.sync(); }, [controller, activation]);
+  // Hide old content in render even before a layout-effect notification clears it.
+  const s = state.ownerKey === controller.currentKey() ? state : blank('changed', 'Context changed. Refresh this chat.');
+  const disabled = s.busy || s.uncertain;
+  const inspectable = project ? s.projectStatus?.project_read_authorized === true && s.projectStatus?.consent_version === 2 : s.initialized;
+  return h('main', { 'aria-label': project ? 'Consented project memory' : 'Current-chat private memory', style: { color: 'var(--ui-text-primary)',
+    padding: '1.5rem', maxWidth: '64rem', lineHeight: 1.6, overflowWrap: 'anywhere' } },
+    h('p', { style: { color: 'var(--ui-text-secondary)' } }, 'ELM / HUMAN REVIEW'),
+    h('h1', null, project ? 'Consented project memory' : 'Current-chat private memory'),
+    h('p', null, 'Review what this chat remembers. Project placement is organization, never permission to read another chat.'),
+    h('div', { style: rowStyle }, button(s.busy ? 'Working…' : 'Refresh records and trash', () => controller.refresh(), s.busy),
+      h('span', null, 'No automatic capture · No automatic approval')),
+    s.error && h('p', { role: 'alert' }, s.error), s.notice && h('p', { role: 'status' }, s.notice),
+    !s.ready && h('p', null, 'Refresh explicitly to inspect memory. These controls require the rebuilt authenticated host APIs.'),
+    project && h(ProjectControls, { key: s.ownerKey, state: s, controller, disabled }),
+    !project && s.ready && s.initialized === false && h('section', { style: sectionStyle }, h('h2', null, 'Start with a fresh private store'),
+      h('p', null, 'Existing global or project memory is not imported.'), button('Review fresh setup', () => controller.stage('setup', null, s.ownerKey), disabled)),
+    inspectable && h(CreateRecordForm, { key: s.ownerKey + ':' + (s.projectKey ?? 'private'), controller, disabled, ownerKey: s.ownerKey, project, projectKey: s.projectKey }),
+    inspectable && h('section', { style: sectionStyle }, h('h2', null, 'Records'),
+      h('nav', { 'aria-label': 'Record state', style: rowStyle }, ...states.map(filter => button(filter,
+        () => controller.filter(filter), s.busy || filter === s.filter))),
+      !s.records.length && h('p', null, 'No records in this view.'),
+      h('ul', null, ...s.records.map(r => h('li', { key: r.id, style: { paddingBlock: '.5rem' } },
+        h('strong', null, r.title), ` · ${r.state} · ${r.sensitive ? 'Sensitive' : r.domain} `,
+        button(r.sensitive ? 'Reveal sensitive record' : 'Inspect record', () => controller.inspect(r.id, s.ownerKey), s.busy)))),
+      s.next && button('Load more records', () => controller.more(false, s.ownerKey), s.busy)),
+    !project && inspectable && h(SourcePanel, { key: s.ownerKey, state: s, controller, disabled }),
+    s.selected && (!project || inspectable) && h(RecordDetail, { key: s.ownerKey, detail: s.selected, controller, disabled, ownerKey: s.ownerKey, projectKey: s.projectKey }),
+    inspectable && h('section', { style: sectionStyle }, h('h2', null, project ? 'Project trash' : 'Private trash'),
+      h('p', null, 'Deleted bodies remain on disk until restoration. No permanent purge is provided. Transcripts, exports and backups are separate.'),
+      !s.trash.length && h('p', null, 'No retained groups in this chat.'),
+      h('ul', null, ...s.trash.map(item => h('li', { key: item.recovery_id }, `${item.record_count} record(s) · ${item.deleted_at} `,
+        button('Review restore', () => controller.stage('restore', item.recovery_id, s.ownerKey, null, s.projectKey), disabled)))),
+      s.trashNext && button('Load more retained groups', () => controller.more(true, s.ownerKey), s.busy)),
+    !project && h(SelectedImportPanel, { controller, state: s }),
+    !project && h(CurationJobsPanel, { controller, state: s }),
+    !project && h(CurationPanel, { controller, state: s }),
+    !project && h(ConversationCapturePanel, { controller, state: s }),
+    !project && h(RecallSettingsPanel, { controller, state: s }),
+    s.action && h(Confirmation, { state: s, controller }),
+    h('footer', { style: sectionStyle }, project ? 'Experimental project review. A refreshed snapshot, not a live authorization indicator. External binding or consent changes are checked before the next operation. No automatic assistant recall or privacy erasure.' : 'Experimental private-chat review. Optional private automatic recall is separate and off by default. Not project automatic recall or privacy erasure.'));
 }
 
-const privateClone = x => JSON.parse(JSON.stringify(x));
-const privateStable = x => JSON.stringify(x && typeof x === "object" ? Array.isArray(x) ? x.map(v=>JSON.parse(privateStable(v))) : Object.fromEntries(Object.keys(x).sort().map(k=>[k,JSON.parse(privateStable(x[k]))])) : x);
-function validPrivateSettings(s) {
-  if(!s || Object.keys(s).sort().join()!=="cap_enabled,private_chat,private_workspace" || s.cap_enabled!==false)return false;
-  const literal=v=>typeof v==="string"&&v.length<=256&&v===v.trim()&&!/[\x00-\x1f\x7f]/.test(v);
-  return ["private_chat","private_workspace"].every(k=>{const e=s[k],c=e?.conversation,m=e?.memory;
-    return e&&Object.keys(e).sort().join()==="conversation,memory,workspace_reads"&&typeof e.workspace_reads==="boolean"&&c&&Object.keys(c).sort().join()==="model,provider"&&m&&Object.keys(m).sort().join()==="allow_host_fallback,mode,model,provider"&&
-      [c,m].every(r=>literal(r.provider)&&literal(r.model)&&!!r.provider===!!r.model)&&["host","follow_chat","separate"].includes(m.mode)&&typeof m.allow_host_fallback==="boolean"&&(m.mode==="separate")===!!m.provider;});
+// Adapted strict document validation and Markdown export from recovered MIT Rich Answers 0.1.1.
+const richCategories = { progress: 'Progress', answer: 'Answer', question: 'Question', final: 'Final answer' };
+const lengths = { title: 180, summary: 1800, sectionTitle: 160, body: 30000, note: 2000 };
+export function safeUrl(value) {
+  if (
+    typeof value !== "string" ||
+    [...value].length > 4096 ||
+    !/^https?:\/\//i.test(value) ||
+    /[\s\\\u0000-\u001f\u007f-\u009f]/.test(value)
+  )
+    return null;
+  try {
+    const parsed = new URL(value);
+    return ["http:", "https:"].includes(parsed.protocol) &&
+      parsed.hostname &&
+      !parsed.username &&
+      !parsed.password
+      ? value
+      : null;
+  } catch {
+    return null;
+  }
 }
-export function createPrivateController(ctx,host=SDK.host) {
-  let disposed=false,generation=0,key="",listeners=new Set();
-  let state={ownerKey:"",data:null,choices:[],pending:false,unconfirmed:false,saveUnknown:false,error:"",notice:"",intent:null,created:null,ready:false};
-  const publish=p=>{state={...state,...p};for(const f of listeners)f();};
-  function sync(){if(disposed)return {session:"",key:"",error:"Private controls disposed"};const c=productIdentity(host);c.key=JSON.stringify([c.key,value(host?.state?.focusedSessionId)]);
-    if(c.key!==key){key=c.key;generation++;publish({ownerKey:key,data:null,choices:[],pending:false,unconfirmed:false,saveUnknown:false,error:c.error,notice:"",intent:null,created:null,ready:false});}return c;}
-  const live=(t,k)=>!disposed&&t===generation&&sync().key===k;
-  const canWrite=c=>!disposed&&!c.error&&!state.pending&&!state.unconfirmed&&!state.saveUnknown&&state.ready;
-  const get=(path,c,extra={})=>ctx.rest(path+"?"+new URLSearchParams({session_id:c.session,...extra}),{timeoutMs:20000});
-  const post=async(path,c,body)=>{const d=await ctx.rest(path,{method:"POST",body:{session_id:c.session,...body},timeoutMs:20000});if(d?.ok!==true||!d.result)throw Error("Unconfirmed private-control write");return d.result;};
-  const valid=(d,c)=>validProductContext(d,c.session)&&Number.isSafeInteger(d.revision)&&d.revision>0&&validPrivateSettings(d.settings)&&typeof d.memory_setup==="boolean"&&Array.isArray(d.projects)&&d.projects.every(p=>typeof p.id==="string"&&typeof p.name==="string"&&typeof p.private_workspace==="boolean");
-  async function inventory(){try{const d=await host.request("model.options",{session_id:value(host.state?.focusedSessionId),explicit_only:true,include_unconfigured:false,refresh:false});
-    if(!Array.isArray(d?.providers))return[];return d.providers.flatMap(p=>p.authenticated===true&&typeof p.slug==="string"&&Array.isArray(p.models)?p.models.filter(m=>typeof m==="string"&&!p.unavailable_models?.includes(m)).map(model=>({provider:p.slug,model})):[]);}catch{return[];}}
-  const admitted=(settings,choices)=>validPrivateSettings(settings)&&["private_chat","private_workspace"].every(k=>[settings[k].conversation,settings[k].memory].every(r=>!r.provider||choices.some(v=>v.provider===r.provider&&v.model===r.model)));
-  async function refresh(){const c=sync();if(disposed||c.error||state.pending)return false;const t=++generation;publish({pending:true,error:""});
-    try{const [d,choices]=await Promise.all([get('/ui/private',c),inventory()]);if(!live(t,c.key))return false;if(!valid(d,c))throw Error('Private controls schema/owner mismatch');
-      const pending=Array.isArray(d.pending)?d.pending:[];publish({data:privateClone(d),choices,pending:false,ready:true,saveUnknown:false,unconfirmed:state.unconfirmed||pending.length>0,intent:state.intent||(pending[0]?{id:pending[0].id}:null)});return true;
-    }catch{if(live(t,c.key))publish({pending:false,ready:false,error:'Private controls could not be verified. Refresh before writing.'});return false;}}
-  async function save(settings){const c=sync();if(!canWrite(c))return false;const t=++generation,revision=state.data.revision;publish({pending:true,error:""});let wrote=false;
-    try{settings=privateClone(settings);const choices=await inventory();if(!live(t,c.key))return false;if(!admitted(settings,choices))throw Error('Choose currently authenticated/available exact model IDs, or native inheritance');
-      wrote=true;const saved=await post('/ui/private/defaults',c,{expected_revision:revision,settings});if(!live(t,c.key))return false;const d=await get('/ui/private',c);if(!live(t,c.key))return false;
-      if(!valid(d,c)||saved.revision!==revision+1||d.revision!==saved.revision||privateStable(d.settings)!==privateStable(settings)||privateStable(saved.settings)!==privateStable(settings))throw Error('Exact defaults readback differs');
-      publish({data:privateClone(d),choices,pending:false,saveUnknown:false,notice:'Defaults saved and independently read back. Existing containers are unchanged.'});return true;
-    }catch(e){if(live(t,c.key))publish({pending:false,saveUnknown:wrote,error:wrote?'Defaults may have committed. Refresh; never retry automatically.':e.message});return false;}}
-  async function create(kind,projectId="",name=""){const c=sync();if(!canWrite(c)||!state.data.memory_setup)return false;
-    if(!["private_chat","workspace_member","private_workspace"].includes(kind))return false;
-    const t=++generation,revision=state.data.revision;publish({pending:true,error:"",notice:"",created:null});let nativeAttempted=false;
-    try{const choices=await inventory();if(!live(t,c.key))return false;
-      if(kind!=="workspace_member"&&!admitted(state.data.settings,choices))throw Error('A selected route is not available. Choose another before creating.');
-      const intent=await post('/ui/private/create',c,{kind,project_id:projectId,name,expected_revision:revision});if(!live(t,c.key))return false;
-      const p=intent.params,wsp=kind==="private_workspace";
-      if(!validProductContext(intent,c.session)||!resultId(intent.id)||intent.method!==(wsp?'projects.create':'session.create')||!p||Object.keys(p).some(k=>!(wsp?["name","use","create_directory"]:["request_id","source","project_id","provider","model","follow_profile_config"]).includes(k)))throw Error('Unexpected native creation contract');
-      if(wsp?(p.name!==name||p.use!==false||p.create_directory!==false):(p.request_id!==intent.id||p.source!=="gui"||(p.project_id||"")!==projectId||!!p.provider!==!!p.model||p.provider&&(!choices.some(v=>v.provider===p.provider&&v.model===p.model)||p.follow_profile_config!==false)))throw Error('Native target or route differs');
-      publish({intent});const before=await get('/ui/private/status',c,{intent_id:intent.id});if(!live(t,c.key))return false;if(before.id!==intent.id||before.state!=="ready")throw Error('Intent not ready');
-      nativeAttempted=true;const native=await host.request(intent.method,privateClone(p));if(!live(t,c.key))return false;
-      const id=wsp?native?.project?.id:native?.stored_session_id;
-      if(typeof id!=="string"||!id||id.length>256||!wsp&&native.message_count!==0)throw Error('Native outcome unknown');
-      const done=await post('/ui/private/finish',c,{intent_id:intent.id,created_id:id});if(!live(t,c.key))return false;
-      const observed=await get('/ui/private/status',c,{intent_id:intent.id});if(!live(t,c.key))return false;
-      if(done.id!==intent.id||done.created_id!==id||done.kind!==kind||done.status!=="configured"||observed.id!==intent.id||observed.state!=="applied"||observed.target!==id||privateStable(observed.outcome)!==privateStable(done))throw Error('Creation not confirmed');
-      publish({pending:false,intent:null,created:privateClone(done),notice:'Native container created and privacy configuration read back. Nothing was installed or globally changed.'});await refresh();return true;
-    }catch(e){if(live(t,c.key))publish({pending:false,unconfirmed:nativeAttempted,error:nativeAttempted?'Native creation may have happened. Inspect the native list; do not repeat.':e.message});return false;}}
-  async function reconcile(){const c=sync();if(c.error||state.pending||!state.intent)return false;const t=++generation;publish({pending:true,error:""});
-    try{const d=await get('/ui/private/status',c,{intent_id:state.intent.id});if(!live(t,c.key))return false;if(d.state!=="applied"||d.outcome?.status!=="configured")throw Error();
-      publish({pending:false,unconfirmed:false,intent:null,created:d.outcome,notice:'Prior creation confirmed by status; nothing was repeated.'});await refresh();return true;
-    }catch{if(live(t,c.key))publish({pending:false,error:'Outcome remains unconfirmed; inspect the native list.'});return false;}}
-  async function abandon(){const c=sync();if(c.error||state.pending||!state.intent)return false;const id=state.intent.id,t=++generation;publish({pending:true});
-    try{await post('/ui/private/abandon',c,{intent_id:id,confirm:true});if(!live(t,c.key))return false;const d=await get('/ui/private/status',c,{intent_id:id});if(!live(t,c.key))return false;if(d.id!==id||!["closed","applied"].includes(d.state))throw Error();
-      publish({pending:false,unconfirmed:false,intent:null,notice:'Attempt closed after your inspection. No container was deleted or creation retried.'});await refresh();return true;
-    }catch{if(live(t,c.key))publish({pending:false,error:'Attempt close is unconfirmed.'});return false;}}
-  async function currentReads(enabled){const c=sync(),v=state.data?.current_policy;if(!canWrite(c)||!v)return false;const t=++generation;publish({pending:true,error:""});
-    try{await post('/read-policy',c,{workspace_enabled:enabled,expected_identity:v.identity,expected_policy_revision:v.policy_revision});if(!live(t,c.key))return false;const d=await get('/read-policy',c);if(!live(t,c.key))return false;if(d.workspace_enabled!==enabled||d.authored_scope_id!==v.authored_scope_id||!d.private)throw Error();
-      publish({pending:false,notice:'Current chat incoming reads updated; outgoing ownership remains private.'});await refresh();return true;
-    }catch{if(live(t,c.key))publish({pending:false,saveUnknown:true,error:'Incoming policy outcome uncertain. Refresh and inspect; no retry.'});return false;}}
-  const stops=["focusedStoredSessionId","focusedSessionId","focusedSessionProfile","focusedSessionOwner","profile","connectionId","gateway"].map(k=>host?.state?.[k]).filter(a=>typeof a?.listen==="function").map(a=>a.listen(sync));sync();
-  return {refresh,save,create,reconcile,abandon,currentReads,getSnapshot:()=>{sync();return state;},subscribe:f=>{listeners.add(f);return()=>listeners.delete(f);},dispose:()=>{disposed=true;generation++;publish({ownerKey:"",data:null,choices:[],intent:null,created:null,pending:false,ready:false,unconfirmed:false,saveUnknown:false,error:"Private controls disposed",notice:""});stops.forEach(f=>f());listeners.clear();}};
+
+function sourceUrl(value) {
+  // Source metadata and the browser's ability to open a link are separate.
+  // The Python store can retain HTTP(S) URIs rejected by WHATWG URL parsing.
+  // Keep those sources inspectable, but never turn them into an OS action.
+  const url = text(value, 4096, true);
+  const authority = /^https?:\/\/([^/?#]+)/i.exec(url)?.[1];
+  if (!authority || /[\\\p{White_Space}]/u.test(url) || authority.includes("@"))
+    throw new Error("Invalid source URL");
+  return url;
 }
-function PrivateForm({s,controller}) {
-  const [draft,setDraft]=useState(()=>privateClone(s.data.settings)),[project,setProject]=useState(""),[name,setName]=useState("");
-  const disabled=s.pending||s.unconfirmed||s.saveUnknown||!s.ready;
-  const dirty=privateStable(draft)!==privateStable(s.data.settings);
-  const set=(kind,fn)=>setDraft(old=>{const d=privateClone(old);fn(d[kind]);return d;});
-  const routeSelect=(label,route,change)=>h("label",{style:{display:'block',marginBlock:'.65rem'}},label,h("select",{"aria-label":label,value:route.provider?JSON.stringify([route.provider,route.model]):"",disabled,onChange:e=>{const [provider,model]=e.target.value?JSON.parse(e.target.value):["",""];change({provider,model});},style:{display:'block',width:'100%',maxWidth:'38rem'}},h('option',{value:""},'Native host default (no global change)'),...s.choices.map(r=>h('option',{key:JSON.stringify([r.provider,r.model]),value:JSON.stringify([r.provider,r.model])},r.provider+' · '+r.model)),route.provider&&!s.choices.some(r=>r.provider===route.provider&&r.model===route.model)&&h('option',{value:JSON.stringify([route.provider,route.model]),disabled:true},'Unavailable: '+route.provider+' · '+route.model)));
-  return h('div',null,
-    ...[['private_chat','Future private chats'],['private_workspace','Future private workspaces / their new member chats']].map(([kind,title])=>h('fieldset',{key:kind,disabled,style:{marginBlock:'1rem',padding:'1rem'}},h('legend',null,title),
-      h('label',null,h('input',{type:'checkbox',checked:draft[kind].workspace_reads,onChange:e=>set(kind,v=>v.workspace_reads=e.target.checked)}),' Read the current workspace pool by default; keep chat-authored notes chat-only'),
-      routeSelect('Conversation model',draft[kind].conversation,r=>set(kind,v=>v.conversation=r)),
-      h('label',null,'Memory-processing route ',h('select',{'aria-label':'Memory-processing route',value:draft[kind].memory.mode,onChange:e=>set(kind,v=>{v.memory.mode=e.target.value;v.memory.provider='';v.memory.model='';})},h('option',{value:'host'},'Host auxiliary route'),h('option',{value:'separate'},'Separate permitted model'),h('option',{value:'follow_chat'},'Follow current chat (snapshot at draft time)'))),
-      draft[kind].memory.mode==='separate'&&routeSelect('Preferred memory model (existing host permission required)',draft[kind].memory,r=>set(kind,v=>Object.assign(v.memory,r))),
-      h('label',{style:{display:'block',marginTop:'.7rem'}},h('input',{type:'checkbox',checked:draft[kind].memory.allow_host_fallback,onChange:e=>set(kind,v=>v.memory.allow_host_fallback=e.target.checked)}),' Explicitly allow the host-configured retry/fallback routes for memory processing. Without this, new-container memory generation stays blocked.'))),
-    h('button',{disabled:disabled||!dirty,onClick:()=>void controller.save(draft)},'Save future defaults'),
-    h('p',null,'Existing containers are not migrated. These defaults apply only to the explicit private-creation actions below. Cloud conversation or memory models receive their selected context. Private is not local-only, provider encryption or a content label. Native conversation retry/fallback settings still apply. Following a chat or selecting a separate memory model requires existing host override permission; the plugin never grants itself one.'),
-    h('fieldset',{disabled:true},h('legend',null,'Optional API spending cap — OFF'),h('input',{type:'checkbox',checked:false,readOnly:true}),' Unavailable: this host has no qualified per-attempt fail-closed gate covering native chat, auxiliary retries and fallback. No enabled cap is advertised.'),
-    h('h2',null,'Create explicitly private containers'),!s.data.memory_setup&&h('p',{role:'status'},'First use Memory → Create fresh memory store. Creation never initializes it automatically.'),
-    h('label',null,'Project placement ',h('select',{'aria-label':'Project placement',disabled,value:project,onChange:e=>setProject(e.target.value)},h('option',{value:''},'Home / no project'),...s.data.projects.map(p=>h('option',{key:p.id,value:p.id},(p.private_workspace?'Private workspace: ':'Project: ')+p.name)))),
-    h('p',null,h('button',{disabled:disabled||dirty||!s.data.memory_setup,onClick:()=>void controller.create('private_chat',project,'')},'New private chat'), ' ',h('button',{disabled:disabled||dirty||!s.data.memory_setup||!s.data.projects.some(p=>p.id===project&&p.private_workspace),onClick:()=>void controller.create('workspace_member',project,'')},'New private-workspace member chat')),
-    h('label',null,'New private workspace name ',h('input',{disabled,value:name,maxLength:256,onChange:e=>setName(e.target.value)})),h('button',{disabled:disabled||dirty||!s.data.memory_setup||!name||name!==name.trim(),onClick:()=>void controller.create('private_workspace','',name)},'New private workspace'),
-    s.data.current_policy?.private&&h('p',null,h('label',null,h('input',{type:'checkbox',disabled:disabled||!s.data.current_policy.workspace_scope_id,checked:s.data.current_policy.workspace_enabled,onChange:e=>void controller.currentReads(e.target.checked)}),' Explicit current-chat choice: read this chat’s current workspace. No outgoing sharing is enabled.')));
+
+function object(value, required, optional) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    required.some((key) => !Object.hasOwn(value, key)) ||
+    Object.keys(value).some(
+      (key) => !required.includes(key) && !optional.includes(key),
+    )
+  )
+    throw new Error("Invalid answer fields");
 }
-function PrivatePage({controller}) {
-  const s=useSyncExternalStore(controller.subscribe,controller.getSnapshot,controller.getSnapshot);
-  useLayoutEffect(()=>{void controller.refresh();},[controller,s.ownerKey]);
-  return h('main',{'aria-label':'Private memory controls',style:{color:'var(--ui-text-primary)',fontSize:'0.9375rem',lineHeight:1.55,padding:'1.25rem',maxWidth:'62rem',overflowWrap:'anywhere'}},
-    h('h1',null,'Private memory controls'),h('p',null,'Separate incoming reads, chat-only ownership and future-container defaults. Normal New Chat / New Project behavior stays unchanged. Controls belong to the focused chat’s owning profile/gateway; focus an owned saved chat first.'),
-    h('button',{disabled:s.pending,onClick:()=>void controller.refresh()},'Refresh private controls'),
-    h('p',{role:'status'},s.pending?'Working…':s.notice),s.error&&h('p',{role:'alert'},s.error),
-    s.unconfirmed&&h('section',null,h('p',null,'A creation attempt is unresolved. Inspect native chats/projects before doing anything else; it will not be repeated.'),h('button',{disabled:s.pending,onClick:()=>void controller.reconcile()},'Check prior attempt'),h('button',{disabled:s.pending,onClick:()=>void controller.abandon()},'I inspected the native list — close attempt without retry or deletion')),
-    s.created&&h('section',null,h('h2',null,s.created.kind==='private_workspace'?'Private workspace configured':'Private chat configured'),h('code',null,s.created.created_id),s.created.kind!=='private_workspace'&&typeof SDK.host?.openSession==='function'&&h('button',{onClick:()=>void SDK.host.openSession(s.created.created_id)},'Open created chat')),
-    s.data&&h(PrivateForm,{key:s.ownerKey+':'+s.data.revision,s,controller}));
+
+function text(value, limit, nonempty = false) {
+  if (
+    typeof value !== "string" ||
+    [...value].length > limit ||
+    (nonempty && !value.trim()) ||
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\ud800-\udfff]/u.test(
+      value,
+    )
+  )
+    throw new Error("Invalid answer text");
+  return value;
+}
+
+export function normalizeDocument(raw) {
+  object(raw, ["title", "summary", "sections"], ["sources", "note", "category"]);
+  if (raw.category !== undefined && !Object.hasOwn(richCategories, raw.category)) throw new Error("Invalid answer category");
+  const doc = {
+    category: raw.category || "answer",
+    title: text(raw.title, lengths.title, true),
+    summary: text(raw.summary, lengths.summary),
+    sections: [],
+    sources: [],
+    note: text(raw.note === undefined ? "" : raw.note, lengths.note),
+  };
+  if (!Array.isArray(raw.sections) || raw.sections.length > 24)
+    throw new Error("Invalid sections");
+  doc.sections = raw.sections.map((section) => {
+    object(section, ["title", "body"], ["detail"]);
+    if (section.detail !== undefined && typeof section.detail !== "boolean")
+      throw new Error("Invalid section");
+    return {
+      title: text(section.title, lengths.sectionTitle, true),
+      body: text(section.body, lengths.body),
+      detail: section.detail === true,
+    };
+  });
+  if (
+    raw.sources !== undefined &&
+    (!Array.isArray(raw.sources) || raw.sources.length > 32)
+  )
+    throw new Error("Invalid sources");
+  const ids = new Set();
+  doc.sources = (raw.sources || []).map((source) => {
+    object(source, ["id", "title", "url"], ["note"]);
+    const id = text(source.id, 64);
+    if (
+      !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(id) ||
+      ids.has(id)
+    )
+      throw new Error("Invalid source");
+    ids.add(id);
+    return {
+      id,
+      title: text(source.title, 300, true),
+      url: sourceUrl(source.url),
+      note: text(source.note === undefined ? "" : source.note, 2000),
+    };
+  });
+  if (new TextEncoder().encode(JSON.stringify(doc)).length > 100000)
+    throw new Error("Answer too large");
+  return doc;
+}
+
+function markdownPlain(value) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replace(/[\\`*_{}\[\]()#+.!|=~\-]/g, "\\$&")
+    .replace(/(^|\n)([ \t]+)/g, (_, prefix, indent) =>
+      prefix + [...indent].map((char) => char === "\t" ? "&#9;" : "&#32;").join(""),
+    )
+    .replaceAll("\n", "  \n");
+}
+
+function markdownLabel(value) {
+  return markdownPlain(value.replace(/[\n\t]/g, " "));
+}
+
+function markdownUrl(value) {
+  return [...new TextEncoder().encode(value)]
+    .map((byte) => {
+      const char = String.fromCharCode(byte);
+      return /[A-Za-z0-9_./:#?&=@\[\]!$%*+,;~\-]/.test(char)
+        ? char
+        : `%${byte.toString(16).toUpperCase().padStart(2, "0")}`;
+    })
+    .join("");
+}
+
+export function toMarkdown(doc) {
+  const parts = [`# ${markdownLabel(doc.title)}`, `Presentation label: ${richCategories[doc.category || "answer"]} (self-declared)`, markdownPlain(doc.summary)];
+  for (const section of doc.sections)
+    parts.push(`## ${markdownLabel(section.title)}`, section.body);
+  if (doc.sources.length) {
+    parts.push("## Sources");
+    for (const source of doc.sources)
+      parts.push(
+        `- [${markdownLabel(source.id)}] [${markdownLabel(source.title)}](${markdownUrl(source.url)})${source.note ? ` — ${markdownLabel(source.note)}` : ""}`,
+      );
+  }
+  if (doc.note) parts.push("## Note", markdownPlain(doc.note));
+  return parts.join("\n\n") + "\n";
+}
+
+
+export function richMarkdownComponents(ctx) {
+  return {
+    a: ({ href, children }) => { const url = safeUrl(href); return url ? h(Button, { type: 'button', variant: 'link', onClick: () => ctx.os?.openExternal?.(url) }, children) : h('span', null, children); },
+    img: ({ alt }) => h('span', null, `Image: ${alt || 'unnamed'} (not loaded automatically)`),
+    pre: ({ children }) => h('pre', { tabIndex: 0, style: { overflowX: 'auto' } }, children),
+    table: ({ children }) => h('div', { role: 'region', 'aria-label': 'Scrollable comparison table', tabIndex: 0, style: { overflowX: 'auto' } }, h('table', null, children)),
+    input: ({ checked }) => h('span', { role: 'img', 'aria-label': checked ? 'Checked' : 'Unchecked' }, checked ? '☑' : '☐'),
+    h1: ({ children }) => h('h4', null, children), h2: ({ children }) => h('h4', null, children), h3: ({ children }) => h('h4', null, children),
+  };
+}
+export function RichAnswerReader({ document, ctx = {}, enabled = true, density = 'comfortable' }) {
+  const [plain, setPlain] = useState(false), [status, setStatus] = useState('');
+  let doc; try { doc = normalizeDocument(document); } catch { return h('p', { role: 'note' }, 'Invalid rich answer. Use the ordinary answer fallback.'); }
+  const markdown = toMarkdown(doc);
+  const body = value => SDK.Streamdown ? h(SDK.Streamdown, { mode: 'static', skipHtml: true, controls: false, components: richMarkdownComponents(ctx) }, value) : h('pre', { style: proseStyle }, value);
+  if (!enabled) return h('pre', { style: proseStyle }, markdown);
+  return h('article', { 'aria-label': 'ELM rich answer', style: { border: '1px solid var(--ui-stroke-secondary)', borderRadius: '12px', padding: density === 'compact' ? '.75rem' : '1.5rem', maxWidth: '76ch', marginInline: 'auto', overflowWrap: 'anywhere' } },
+    h('p', null, h('strong', null, richCategories[doc.category]), ' · self-declared presentation, not verified completion'),
+    h('h2', null, doc.title), h('p', { style: proseStyle }, doc.summary),
+    doc.note && h('aside', { style: sectionStyle }, h('strong', null, 'Important context'), h('p', { style: proseStyle }, doc.note)),
+    h('div', { style: rowStyle }, button(plain ? 'Formatted view' : 'Markdown text', () => setPlain(!plain)),
+      button('Copy full answer', async () => { try { if (!ctx.os?.writeClipboard || !(await ctx.os.writeClipboard(markdown))) throw Error(); setStatus('Copied'); } catch { setStatus('Copy unavailable; use Markdown text.'); } })),
+    status && h('p', { role: 'status' }, status),
+    plain ? h('pre', { style: proseStyle }, markdown) : h('div', null,
+      ...doc.sections.map((section, index) => section.detail ? h('details', { key: index, style: sectionStyle }, h('summary', null, section.title), body(section.body)) : h('section', { key: index, style: sectionStyle }, h('h3', null, section.title), body(section.body))),
+      doc.sources.length > 0 && h('section', { style: sectionStyle }, h('h3', null, 'Sources'), h('p', null, 'Links open only when you choose them. Source labels are not independent verification.'),
+        h('ol', null, ...doc.sources.map(source => h('li', { key: source.id }, h('span', null, `[${source.id}] `), button(source.title, () => ctx.os?.openExternal?.(safeUrl(source.url)), !safeUrl(source.url)), h('p', { style: proseStyle }, source.url), source.note && h('p', null, source.note)))))));
+}
+
+export function parseRichDirective(attrs) {
+  if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs) || Object.keys(attrs).some(key => !['category', 'title', 'text'].includes(key)) || Object.values(attrs).some(value => typeof value !== 'string') || JSON.stringify(attrs).length > 2048) throw new Error('Invalid inline answer');
+  const category = attrs.category || 'answer';
+  if (!Object.hasOwn(richCategories, category)) throw new Error('Invalid category');
+  return { category, title: text(attrs.title || richCategories[category], 180, true), summary: text(attrs.text || '', 1200), sections: [], sources: [] };
+}
+export function createRichPreferences(ctx) {
+  const normalize = raw => ({ enabled: raw?.enabled !== false, density: raw?.density === 'compact' ? 'compact' : 'comfortable' });
+  let state; try { state = normalize(ctx.storage?.get?.('rich-reading.v1', {})); } catch { state = { ...normalize({}), save_error: 'Saved reading preferences unavailable; using temporary defaults.' }; }
+  const listeners = new Set();
+  return { getSnapshot: () => state, subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    set(patch) { const next = normalize({ ...state, ...patch }); try { if (!ctx.storage?.set) throw Error(); ctx.storage.set('rich-reading.v1', next); state = next; } catch { state = { ...next, save_error: 'Reading preference changed for this session only; saving is unavailable.' }; } for (const fn of listeners) fn(); },
+    dispose() { listeners.clear(); } };
+}
+export function RichInlineAnswer({ attrs, source = '', streaming = false, preferences, ctx }) {
+  const prefs = useSyncExternalStore(preferences.subscribe, preferences.getSnapshot, preferences.getSnapshot);
+  let doc; try { doc = parseRichDirective(attrs); } catch { return h('span', { style: proseStyle }, source); }
+  // No data fetch or storage. Disabled/streaming displays the complete bounded text.
+  if (!prefs.enabled || streaming) return h('div', { style: proseStyle }, `${richCategories[doc.category]} (self-declared): ${doc.title}${doc.summary ? '\n' + doc.summary : ''}`);
+  return h(RichAnswerReader, { document: doc, ctx, enabled: true, density: prefs.density });
+}
+export function RichSettingsPage({ preferences, ctx }) {
+  const prefs = useSyncExternalStore(preferences.subscribe, preferences.getSnapshot, preferences.getSnapshot);
+  return h('main', { style: { padding: '1.5rem', maxWidth: '80ch', margin: 'auto' } }, h('h1', null, 'Rich answer reading'),
+    h('p', null, 'Frontend-only presentation. Ordinary messages remain native Markdown. Only explicit elm-answer directives receive a bounded card; categories are self-declared, not verified progress or completion.'),
+    h('label', null, h('input', { type: 'checkbox', checked: prefs.enabled, onChange: e => preferences.set({ enabled: e.target.checked }) }), 'Enable rich answer formatting'),
+    h('label', null, 'Reading spacing', h('select', { value: prefs.density, onChange: e => preferences.set({ density: e.target.value }) }, h('option', { value: 'comfortable' }, 'Comfortable'), h('option', { value: 'compact' }, 'Compact'))),
+    h('p', null, 'Preferences are local to this ELM desktop plugin, shared across profiles. Only display preferences are stored, never answer bodies. Disabling formatting retains the inline text and does not enable or disable memory, external processing or the plugin itself.'),
+    prefs.save_error && h('p', { role: 'status' }, prefs.save_error),
+    h('h2', null, 'Author syntax'), h('pre', { style: proseStyle }, '::elm-answer{category="answer" title="A clear plan" text="Start with the door."}'),
+    h('p', null, 'Categories: progress, answer, question, final. Optional title ≤180 Unicode characters; optional plain text ≤1200. Total attributes must fit the native 2048-character directive cap. Use ordinary Markdown after the directive for longer answers. No saved-document publish tool or legacy answer store is enabled.'),
+    h('h2', null, 'Synthetic component examples, not a native screenshot'),
+    ...Object.keys(richCategories).map(category => h(RichInlineAnswer, { key: category, attrs: { category, title: `${richCategories[category]} example`, text: 'Synthetic presentation example. No request, result or completion is implied.' }, source: '', streaming: false, preferences, ctx })));
+}
+function registerRichPresentation(ctx) {
+  if (typeof SDK.TRANSCRIPT_DIRECTIVE_AREA !== 'string') return;
+  const preferences = createRichPreferences(ctx); ctx.onDispose(() => preferences.dispose());
+  ctx.register({ id: 'rich-inline-answer', area: SDK.TRANSCRIPT_DIRECTIVE_AREA, data: { name: 'elm-answer', render: props => h(RichInlineAnswer, { ...props, preferences, ctx }) } });
+  ctx.registerSettingsPage?.({ id: 'rich-reading', title: 'Rich answer reading', render: () => h(RichSettingsPage, { preferences, ctx }) });
+}
+
+// Whole-message presentation is distinct from inline rich-answer cards.
+export const messageTypes = { progress: 'Progress', update: 'Update', answer: 'Answer', final: 'Final', question: 'Question' };
+const messageAccents = ['theme','blue','green','amber','violet','rose'];
+const messageDefaults = type => ({ enabled: true, label: messageTypes[type], showLabel: true, accent: 'theme', background: 'subtle', border: 'side' });
+function normalizeMessagePreferences(raw = {}) {
+  const types = {};
+  for (const type of Object.keys(messageTypes)) {
+    const defaults = messageDefaults(type), item = raw?.types?.[type] || {};
+    const label = typeof item.label === 'string' && item.label.trim() && item.label.length <= 24 && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(item.label) ? item.label.trim() : defaults.label;
+    types[type] = { enabled: item.enabled !== false, label, showLabel: item.showLabel !== false,
+      accent: messageAccents.includes(item.accent) ? item.accent : defaults.accent,
+      background: ['none','subtle'].includes(item.background) ? item.background : defaults.background,
+      border: ['none','side','outline'].includes(item.border) ? item.border : defaults.border };
+  }
+  return { enabled: raw?.enabled === true, types };
+}
+export function classifyMessagePresentation({role,textPrefix,streaming}, preferences) {
+  if (role !== 'assistant' || typeof textPrefix !== 'string' || !preferences?.enabled) return null;
+  let prefix = textPrefix.slice(0,8192);
+  if (textPrefix.length > 8192 || (streaming && !prefix.endsWith('\n'))) prefix = prefix.slice(0,prefix.lastIndexOf('\n')+1);
+  let fence = null, previousBlank = true;
+  for (const line of prefix.split(/\r?\n/)) {
+    const canStart = previousBlank; previousBlank = !line.trim();
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (marker) { if (!fence) fence = {char:marker[1][0],length:marker[1].length}; else if(marker[1][0]===fence.char && marker[1].length>=fence.length && !marker[2].trim()) fence=null; continue; }
+    if (fence) continue;
+    const match = /^ {0,3}::elm-message\{type="(progress|update|answer|final|question)"\}[ \t]*$/.exec(line);
+    if (match && canStart) { const item=preferences.types[match[1]]; if(!item?.enabled)return null; const {enabled,...style}=item; return {type:match[1],...style}; }
+  }
+  return null;
+}
+export function createMessagePresentationPreferences(ctx) {
+  let state; try { state=normalizeMessagePreferences(ctx.storage?.get?.('message-presentation.v1',{})); } catch { state={...normalizeMessagePreferences(),save_error:'Saved display preferences unavailable; whole-message styling stays off.'}; }
+  const listeners=new Set();
+  const save=raw=>{const next=normalizeMessagePreferences(raw);try{if(!ctx.storage?.set)throw Error();ctx.storage.set('message-presentation.v1',next);state=next;}catch{state={...next,save_error:'Changed for this session only; saving is unavailable.'};}for(const f of listeners)f();};
+  return {getSnapshot:()=>state,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},setEnabled(enabled){save({...state,enabled:enabled===true});},setType(type,patch){if(Object.hasOwn(messageTypes,type))save({...state,types:{...state.types,[type]:{...state.types[type],...patch}}});},reset(){save({});},dispose(){listeners.clear();}};
+}
+export function MessagePresentationSettings({preferences,supported}) {
+  const prefs=useSyncExternalStore(preferences.subscribe,preferences.getSnapshot,preferences.getSnapshot);
+  const select=(label,value,options,onChange)=>h('label',null,label,' ',h('select',{value,onChange:e=>onChange(e.target.value)},...options.map(x=>h('option',{key:x,value:x},x))));
+  return h('main',{style:{maxWidth:'76ch',padding:'1.5rem',margin:'auto'}},h('h1',null,'Message bubble types'),
+    h('p',null,'Style the whole assistant message, not just an inline answer card. Types are author-declared presentation, never verified progress, completion, correctness or authority.'),
+    h('label',null,h('input',{type:'checkbox',checked:prefs.enabled,disabled:!supported,onChange:e=>preferences.setEnabled(e.target.checked)}),'Enable whole-message type styling'),
+    !supported&&h('p',{role:'note'},'This host lacks native whole-message presentation support. No bubble styling is emulated.'),
+    h('p',null,'Off by default. These display settings are local to this Desktop installation and shared across ELM profiles. No message contents are stored by these preferences. Disabling removes the style policy; native messages remain unchanged.'),
+    prefs.save_error&&h('p',{role:'status'},prefs.save_error),
+    h('h2',null,'Author syntax'),h('pre',{style:proseStyle},'::elm-message{type="question"}\nWhat should we do next?'),
+    h('p',null,'Place one marker at the start of the message or after a blank line, on its own line outside quoted, fenced or indented code, within the first 8192 characters. Mixed tool/reasoning messages and text-fragment boundaries without a real newline are conservatively left unstyled. The first recognized marker controls this message. During streaming, the marker line must end with a newline. The marker remains visible in ordinary Markdown and copy output: this feature does not remove or rewrite source text. It does not instruct a model to generate markers automatically.'),
+    ...Object.keys(messageTypes).map(type=>{const p=prefs.types[type];return h('fieldset',{key:type,style:sectionStyle},h('legend',null,messageTypes[type]),
+      h('label',null,h('input',{type:'checkbox',checked:p.enabled,onChange:e=>preferences.setType(type,{enabled:e.target.checked})}),'Style this type'),
+      h('label',null,'Short label ',h('input',{value:p.label,maxLength:24,onChange:e=>preferences.setType(type,{label:e.target.value})})),
+      h('label',null,h('input',{type:'checkbox',checked:p.showLabel,onChange:e=>preferences.setType(type,{showLabel:e.target.checked})}),'Show type label'),
+      select('Accent',p.accent,messageAccents,accent=>preferences.setType(type,{accent})),
+      select('Background',p.background,['none','subtle'],background=>preferences.setType(type,{background})),
+      select('Border',p.border,['none','side','outline'],border=>preferences.setType(type,{border})));}),
+    h('button',{type:'button',onClick:()=>preferences.reset()},'Reset display defaults'));
+}
+export function registerMessagePresentation(ctx) {
+  const supported=typeof SDK.TRANSCRIPT_PRESENTATION_AREA==='string',preferences=createMessagePresentationPreferences(ctx);let unregister=null;
+  const sync=()=>{if(unregister){unregister();unregister=null;}const snapshot=preferences.getSnapshot();if(supported&&snapshot.enabled)unregister=ctx.register({id:'message-bubble-types',area:SDK.TRANSCRIPT_PRESENTATION_AREA,data:{classify:input=>classifyMessagePresentation(input,snapshot)}});};
+  ctx.registerSettingsPage?.({id:'message-bubble-types',title:'Message bubble types',render:()=>h(MessagePresentationSettings,{preferences,supported})});
+  const stop=preferences.subscribe(sync);sync();ctx.onDispose(()=>{stop();if(unregister)unregister();unregister=null;preferences.dispose();});return preferences;
+}
+
+const importanceLabels = { important: 'Important', decision: 'Decision', question: 'Question', warning: 'Warning', result: 'Result' };
+export function classifyImportantMessage({ role, textPrefix }) {
+  if (!['user', 'assistant'].includes(role) || typeof textPrefix !== 'string') return null;
+  const prefix = textPrefix.slice(0, 8192), lines = prefix.split(/\r?\n/);
+  // Never classify a potentially cut final line from a bounded prefix.
+  if (prefix.length >= 8192) lines.pop();
+  let fence = null;
+  for (const line of lines) {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (marker) {
+      if (!fence) fence = { char: marker[1][0], length: marker[1].length };
+      else if (marker[1][0] === fence.char && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      continue;
+    }
+    if (fence) continue;
+    const match = /^ {0,3}::elm-important\{kind="(important|decision|question|warning|result)"\}[ \t]*$/.exec(line);
+    if (match) return { label: importanceLabels[match[1]] };
+  }
+  return null;
+}
+export function createImportancePreferences(ctx) {
+  let state; try { state = { enabled: ctx.storage?.get?.('importance.v1', {})?.enabled === true }; }
+  catch { state = { enabled: false, save_error: 'Importance preference unavailable; highlighting stays off.' }; }
+  const listeners = new Set();
+  return { getSnapshot: () => state, subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    set(enabled) { const next = { enabled: enabled === true }; try { if (!ctx.storage?.set) throw Error(); ctx.storage.set('importance.v1', next); state = next; } catch { state = { ...next, save_error: 'Changed for this session only; saving is unavailable.' }; } for (const fn of listeners) fn(); },
+    dispose() { listeners.clear(); } };
+}
+export function ImportanceSettingsPage({ preferences, supported }) {
+  const prefs = useSyncExternalStore(preferences.subscribe, preferences.getSnapshot, preferences.getSnapshot);
+  return h('main', { style: { maxWidth: '76ch', padding: '1.5rem', margin: 'auto' } }, h('h1', null, 'Important messages'),
+    h('p', null, 'Explicit message markers, not automatic judgments. A marked decision or result is self-declared and does not verify correctness, completion or authority.'),
+    h('label', null, h('input', { type: 'checkbox', checked: prefs.enabled, disabled: !supported, onChange: e => preferences.set(e.target.checked) }), 'Highlight marked messages and show clickable timeline markers'),
+    !supported && h('p', { role: 'note' }, 'This host lacks the native importance contribution. No timeline or navigation is emulated.'),
+    prefs.save_error && h('p', { role: 'status' }, prefs.save_error),
+    h('p', null, 'Off by default. This local display preference is shared across ELM Desktop profiles; no message bodies or marker identities are saved. Disabling unregisters the importance policy. The host retains ownership of message IDs, session scope and navigation.'),
+    h('h2', null, 'Mark a message'), h('pre', { style: proseStyle }, '::elm-important{kind="decision"}'),
+    h('p', null, 'Place the marker on its own line outside fenced or indented code. Supported kinds: important, decision, question, warning, result. Only the first recognized marker in the first 8192 characters is used. Markers in fenced-code examples are ignored.'),
+    h('p', null, 'Loaded messages only. Existing native user ticks can be decorated; marked loaded assistant messages get host-owned ticks. No extra assistant-history bodies are fetched. A marker click uses native scoped navigation, not a plugin-generated destination.'),
+    h('h2', null, 'Synthetic marker labels, not a timeline screenshot'),
+    h('div', { style: rowStyle }, ...Object.values(importanceLabels).map(label => h('span', { key: label, style: { padding: '.4rem .6rem', borderInlineStart: '3px solid var(--ui-text-primary)' } }, label))),
+    h('p', null, 'The samples above demonstrate labels only. They are not clickable timeline markers and do not claim native visual acceptance.'));
+}
+export function ImportantMarker({ attrs, source = '' }) {
+  if (!attrs || Object.keys(attrs).length !== 1 || typeof attrs.kind !== 'string' || !Object.hasOwn(importanceLabels, attrs.kind)) return h('span', { style: proseStyle }, source);
+  return h('span', { role: 'note' }, `${importanceLabels[attrs.kind]} · marked by author, not verified`);
+}
+export function registerImportancePresentation(ctx) {
+  const supported = typeof SDK.TRANSCRIPT_IMPORTANCE_AREA === 'string';
+  const preferences = createImportancePreferences(ctx); let unregister = null;
+  if (typeof SDK.TRANSCRIPT_DIRECTIVE_AREA === 'string') ctx.register({ id: 'important-message-label', area: SDK.TRANSCRIPT_DIRECTIVE_AREA, data: { name: 'elm-important', render: props => h(ImportantMarker, props) } });
+  const sync = () => {
+    if (unregister) { unregister(); unregister = null; }
+    if (supported && preferences.getSnapshot().enabled) unregister = ctx.register({ id: 'explicit-important-messages', area: SDK.TRANSCRIPT_IMPORTANCE_AREA, data: { classify: classifyImportantMessage } });
+  };
+  // Settings remain available on older hosts, but unsupported navigation is never invented.
+  ctx.registerSettingsPage?.({ id: 'important-messages', title: 'Important messages', render: () => h(ImportanceSettingsPage, { preferences, supported }) });
+  const stop = preferences.subscribe(sync); sync();
+  ctx.onDispose(() => { stop(); if (unregister) unregister(); unregister = null; preferences.dispose(); });
+  return preferences;
+}
+
+export function createChatFolderPreferences(ctx) {
+  let state;try{state={enabled:ctx.storage?.get?.('chat-folders.v1',{})?.enabled===true};}catch{state={enabled:false,save_error:'Display preference unavailable; folder section stays off.'};}
+  const listeners=new Set();return{getSnapshot:()=>state,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},set(enabled){const next={enabled:enabled===true};try{if(!ctx.storage?.set)throw Error();ctx.storage.set('chat-folders.v1',next);state=next;}catch{state={...next,save_error:'Display changed for this session only; saving unavailable.'};}for(const fn of listeners)fn();},dispose(){listeners.clear();}};
+}
+function ChatFolderRow({folder,status,controller,ownerKey,disabled}) {
+  const [editing,setEditing]=useState(false), [label,setLabel]=useState(folder.label);
+  return h('li',{style:{padding:'0.75rem 0',borderBottom:'1px solid #9994'}},
+    h('strong',null,folder.label+' '),
+    button('File current chat here',()=>controller.stageChatFolder('file',folder.id,ownerKey,status),disabled||status.current_folder_id===folder.id),
+    button(editing?'Cancel rename':'Rename',()=>{setEditing(!editing);setLabel(folder.label);controller.cancel();},disabled),
+    editing&&h('div',null,h('label',null,'New name for '+folder.label,h(Input,{value:label,maxLength:80,disabled,onChange:e=>{setLabel(e.target.value);controller.cancel();}})),
+      button('Review rename',()=>controller.stageChatFolder('rename',{folder_id:folder.id,label},ownerKey,status),disabled||!label.trim()||label!==label.trim()||label===folder.label)),
+    button('Review removing empty folder',()=>controller.stageChatFolder('remove',folder.id,ownerKey,status),disabled||folder.removable!==true),
+    folder.removable!==true&&h('small',null,' Removal unavailable: this folder has saved memberships, or empty status has not been verified. Unfile its chats first.'));
+}
+export function ChatFoldersPage({controller,preferences,supported}) {
+  const observed=useSyncExternalStore(controller.subscribe,controller.getSnapshot,controller.getSnapshot), prefs=useSyncExternalStore(preferences.subscribe,preferences.getSnapshot,preferences.getSnapshot);
+  const state=observed.ownerKey===controller.currentKey()?observed:blank(controller.currentKey());
+  const [label,setLabel]=useState(''); useLayoutEffect(()=>{setLabel('');},[state.ownerKey]); const status=state.folderStatus, disabled=state.busy||state.uncertain||!!state.error;
+  return h('main',{style:{padding:'1.5rem',maxWidth:'76ch',margin:'auto'}},h('h1',null,'Folders for chats'),
+    h('p',null,'Metadata-only filing, not filesystem folders or native project moves. No working-directory, git, native project or ELM memory-permission changes.'),
+    h('label',null,h('input',{type:'checkbox',checked:prefs.enabled,disabled:!supported,onChange:e=>preferences.set(e.target.checked)}),'Show chat folders in the native sidebar'),
+    !supported&&h('p',{role:'note'},'This host lacks the native chat-folder section; no sidebar is emulated.'),prefs.save_error&&h('p',{role:'status'},prefs.save_error),
+    h('p',null,'Off by default. Display preference is local/shared across profiles; folder membership is authenticated host metadata. Refresh is explicit. Only already-loaded, exact-owner native chat rows are shown; unavailable or unloaded rows do not imply empty folders. Recents, Projects and search remain unchanged.'),
+    button('Refresh current-chat folders',()=>controller.refreshChatFolders(state.ownerKey),state.busy),state.error&&h('p',{role:'alert'},state.error),state.notice&&h('p',{role:'status'},state.notice),
+    state.uncertain&&h('p',null,'Outcome uncertain: inspect current folders before another intentional action; never replay automatically.'),
+    status&&h('section',{key:state.ownerKey},h('p',null,`Current chat ${status.current_session_id} · revision ${status.revision} · ${status.unavailable_members || 0} unavailable saved membership(s) · folder ${status.folders.find(f=>f.id===status.current_folder_id)?.label||'Unfiled'}`),
+      h('label',null,'New folder label',h(Input,{value:label,maxLength:80,disabled,onChange:e=>setLabel(e.target.value)})),button('Review creating folder',()=>controller.stageChatFolder('create',label,state.ownerKey,status),disabled||!label.trim()),
+      h('ul',null,...status.folders.map(folder=>h(ChatFolderRow,{key:state.ownerKey+':'+status.revision+':'+folder.id,folder,status,controller,ownerKey:state.ownerKey,disabled}))),
+      button('Review unfiling current chat',()=>controller.stageChatFolder('file',null,state.ownerKey,status),disabled||!status.current_folder_id),
+      button('Review undoing latest filing',()=>controller.stageChatFolder('undo',null,state.ownerKey,status),disabled||!status.undo_available)),
+    state.action?.kind.startsWith('folder_')&&h(Confirmation,{state,controller}),
+    h('p',null,'Flat chat folders support create, rename, removal when no saved memberships remain, current-chat file/unfile and revision-safe filing undo. Folder management clears prior filing undo. Nesting, drag-and-drop and full-history folder loading are not implemented. No chats are deleted and no synthetic rows are inserted.'));
+}
+export function bindNativeChatFolders(ctx,controller,preferences,supported) {
+  let unregister=null;
+  const sync=()=>{if(unregister){unregister();unregister=null;}if(supported&&preferences.getSnapshot().enabled){const snapshot=controller.chatFolderSnapshot();if(snapshot)unregister=ctx.register({id:'native-chat-folders',area:SDK.CHAT_FOLDERS_AREA,data:snapshot});}};
+  const stopController=controller.subscribe(sync),stopPreferences=preferences.subscribe(sync);sync();
+  return()=>{stopController();stopPreferences();if(unregister)unregister();unregister=null;};
+}
+
+export function createUpdateController(host, epoch=()=>0) {
+  const identify=()=>{const s=host?.state||{},profile=read(s.profile),connection=read(s.connectionId),gateway=read(s.gateway);return {profile,key:JSON.stringify([profile,connection,gateway,epoch()]),error:!profile||!connection||gateway!=='open'?'Connect the intended profile before refreshing update policy.':''};};
+  let identity=identify(),generation=0,disposed=false;
+  const empty=()=>({ownerKey:identity.key,status:null,action:null,busy:false,uncertain:false,error:identity.error});
+  let state=empty();const listeners=new Set(),stops=[];
+  const publish=patch=>{state={...state,...patch};for(const fn of listeners)fn();};
+  const sync=()=>{const next=identify();if(next.key!==identity.key){identity=next;generation++;state=empty();for(const fn of listeners)fn();}return next;};
+  for(const atom of Object.values(host?.state||{}))if(atom?.subscribe)stops.push(atom.subscribe(sync));
+  const validStatus=s=>s?.name==='elm'&&['inherit','enabled','disabled'].includes(s.mode)&&Number.isSafeInteger(s.revision)&&s.revision>=0&&typeof s.source_fingerprint==='string'&&typeof s.eligible==='boolean'&&typeof s.effective_auto_apply==='boolean';
+  async function run(action) {
+    const current=sync();if(disposed||current.error||state.busy)return;
+    if(action&&(action!==state.action||action.ownerKey!==current.key||state.uncertain))return;
+    const stamp=++generation,socket=host.getGateway?.();
+    const valid=()=>!disposed&&sync().key===current.key&&generation===stamp&&(!host.getGateway||host.getGateway()===socket);
+    publish({busy:true,error:'',action:null,status:null});
+    try{
+      const result=await host.request('plugins.manage',{action:'auto_update_plugin',name:'elm',profile:current.profile,...(action?{enable:action.enable,expected_revision:action.status.revision,expected_source:action.status.source_fingerprint,confirm:true}:{})});
+      if(!valid())return;if(!validStatus(result))throw Error('Unsupported update-policy response. Refresh after checking host compatibility.');
+      publish({status:result,busy:false,uncertain:false});
+    }catch(error){if(valid())publish({status:null,busy:false,uncertain:!!action,error:action?'Policy change was not confirmed. An admitted update may still be running. Refresh to reconcile; nothing is retried automatically.':'Could not read local update policy. Check the host connection and compatibility, then refresh.'});}
+  }
+  return {getSnapshot:()=>state,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},currentKey:()=>identify().key,refresh:()=>run(null),stage(enable,ownerKey=state.ownerKey,status=state.status){const current=sync();if(disposed||current.error||current.key!==ownerKey||state.busy||state.uncertain||!status||status!==state.status||typeof enable!=='boolean'||(enable&&!status.eligible))return;publish({action:Object.freeze({enable,ownerKey,status:JSON.parse(JSON.stringify(status))})});},confirm:(action=state.action)=>action?run(action):undefined,cancel(){publish({action:null});},dispose(){disposed=true;generation++;for(const stop of stops)stop();listeners.clear();}};
+}
+export function safeUpdateSource(source) {
+  if(!source)return null;
+  const result={};for(const key of ['catalog_name','subdir','tier','installed_revision'])result[key]=typeof source[key]==='string'?source[key].slice(0,512):'not reported';
+  try{const u=new URL(source.repo);result.repo=!['https:','http:'].includes(u.protocol)||u.username||u.password||u.search||u.hash?'Source URL withheld; unsupported or contains private components':u.origin+u.pathname;}catch{result.repo='Source URL unavailable';}
+  return result;
+}
+export function UpdatePolicyPage({controller}) {
+  const state=useSyncExternalStore(controller.subscribe,controller.getSnapshot,controller.getSnapshot);
+  if(state.ownerKey!==controller.currentKey())return h('p',null,'Profile changed. Refresh update policy in the intended profile.');
+  const status=state.status,action=state.action,source=safeUpdateSource((action?.status||status)?.source);
+  return h('section',{style:{padding:'1rem',maxWidth:900}},h('h1',null,'ELM automatic updates'),
+    h('p',null,'Local policy inspection only. Refresh does not fetch updates or install code. No host upgrade is performed.'),
+    h('button',{disabled:state.busy,onClick:()=>controller.refresh()},state.busy?'Waiting for host…':'Refresh local update policy'),
+    state.error&&h('p',{role:'alert'},state.error),
+    status&&h('div',null,h('p',null,`Policy: ${status.mode}. Effective automatic application: ${status.effective_auto_apply?'on':'off'}.`),
+      h('p',null,'Inherited policy follows the existing profile-wide host setting; it is not necessarily off. Explicit Off blocks automatic application for ELM, not every native update check.'),
+      h('p',null,'Eligibility: '+(status.eligible?'recognized catalog source':String(status.reason||'unavailable'))),
+      h('p',null,`Startup check policy: ${status.startup_check===true?'enabled':'not enabled'}. Interval: ${Number.isFinite(status.check_hours)?status.check_hours:'not reported'} hours. A check may contact the approved source; policy refresh above is local only.`),
+      h('p',null,'Updates run during gateway housekeeping when due, not necessarily when the Desktop opens. Updated code loads in new sessions. Disabling cannot cancel an already admitted operation.'),
+      h('button',{disabled:state.busy||state.uncertain||!status.eligible,onClick:()=>controller.stage(true,state.ownerKey,status)},'Review enabling automatic updates'),
+      h('button',{disabled:state.busy||state.uncertain,onClick:()=>controller.stage(false,state.ownerKey,status)},'Review turning automatic updates off'),
+      status.last_result==='updated_needs_restart'&&h('p',{role:'status'},'Files were updated, but activation was not confirmed. Further automatic application is disabled. Inspect the result, restart as needed, then review consent again; do not replay the update.'),
+      h('p',null,'Attempted or outcome_unconfirmed does not prove an update completed. No per-plugin last-check timestamp is provided by this host contract.'),
+      h('p',null,'Last result: '+(status.last_result==null?'No result reported':['configured','current','updated','updated_needs_restart','needs_review','outcome_unconfirmed','attempted'].includes(typeof status.last_result==='string'?status.last_result:status.last_result.status)?(typeof status.last_result==='string'?status.last_result:status.last_result.status):'Host result available; unrecognized details withheld'))),
+    source&&h('dl',null,...['catalog_name','repo','subdir','tier','installed_revision'].map(key=>h('div',{key},h('dt',null,key),h('dd',{style:proseStyle},String(source[key]??'not reported'))))),
+    action&&h('div',{role:'region','aria-label':'Update policy confirmation'},h('h2',null,action.enable?'Enable future ELM code updates?':'Turn automatic ELM updates off?'),
+      h('p',null,'This changes only the ELM policy in the currently selected profile. Enabling authorizes scheduled checks contacting the reviewed source and future code execution from the reviewed recognized catalog source, not cryptographic publisher verification. New capabilities or unsafe updates still require native review. Manual-copy installations cannot be enabled here.'),
+      h('p',null,`Reviewed policy revision: ${action.status.revision}`),
+      h('button',{disabled:state.busy,onClick:()=>controller.confirm(action)},'Confirm policy change'),h('button',{disabled:state.busy,onClick:()=>controller.cancel()},'Cancel')));
+}
+
+export function createWikiController(host,epoch=()=>0){
+ let identity=reviewIdentity(host,epoch),generation=0,disposed=false,lane=null;
+ const empty=()=>({ownerKey:identity.key,lane,records:[],snapshot:null,next:null,page:null,evidence:null,busy:false,error:identity.error});let state=empty();const listeners=new Set(),stops=[];
+ const publish=patch=>{state={...state,...patch};for(const fn of listeners)fn();};
+ const sync=()=>{const next=reviewIdentity(host,epoch);if(next.key!==identity.key){identity=next;generation++;lane=null;state=empty();for(const fn of listeners)fn();}return next;};
+ for(const atom of Object.values(host?.state||{}))if(atom?.subscribe)stops.push(atom.subscribe(sync));
+ const rowValid=r=>r&&typeof r.id==='string'&&r.id.length>0&&r.id.length<=512&&Number.isSafeInteger(r.revision)&&r.revision>0&&['title','domain','kind','basis','topic','updated_at'].every(k=>typeof r[k]==='string'&&r[k].length<=512)&&typeof r.sensitive==='boolean';
+ const responseValid=(r,scope,snapshot)=>r?.lane===scope&&r.inspection_only===true&&r.content_role==='untrusted_memory_data'&&typeof r.snapshot_key==='string'&&/^[a-f0-9]{64}$/.test(r.snapshot_key)&&(!snapshot||r.snapshot_key===snapshot);
+ async function request(kind,ownerKey,expectedState,record){const current=sync();if(disposed||current.error||current.key!==ownerKey||state!==expectedState||state.busy||!lane)return;
+  const scope=lane,snapshot=kind==='index'?null:state.snapshot,stamp=++generation,socket=host.getGateway?.(),oldRecords=state.records;
+  if(kind==='more'&&!state.next||['page','evidence'].includes(kind)&&(!record||!snapshot))return;
+  if(kind==='page'&&!state.records.some(r=>r.id===record.id&&r.revision===record.revision))return;
+  if(kind==='evidence'&&(state.page?.id!==record.id||state.page?.revision!==record.revision))return;
+  const params=kind==='index'?{limit:16}:kind==='more'?{limit:16,before:state.next,expected_snapshot:snapshot}:{record_id:record.id,expected_snapshot:snapshot};
+  const valid=()=>!disposed&&sync().key===current.key&&lane===scope&&generation===stamp&&(!host.getGateway||host.getGateway()===socket);
+  publish({busy:true,error:'',page:kind==='evidence'?state.page:null,evidence:null,...(kind==='index'?{records:[],snapshot:null,next:null}:{})});
+  try{const r=await host.request(`plugin.elm.wiki.${scope}.${kind==='more'?'index':kind}`,{...params,session_id:current.session});if(!valid())return;
+   if(!responseValid(r,scope,snapshot))throw Error('snapshot');
+   if(kind==='index'||kind==='more'){if(!Array.isArray(r.records)||r.records.length>32||!r.records.every(rowValid)||(r.next_before!=null&&(typeof r.next_before!=='string'||r.next_before.length>512)))throw Error('index');publish({records:kind==='more'?[...oldRecords,...r.records]:r.records,snapshot:r.snapshot_key,next:r.next_before||null,busy:false});}
+   else if(kind==='page'){if(!Number.isSafeInteger(r.source_count)||r.source_count<0||r.source_count>64||!rowValid(r.record)||typeof r.record.text!=='string'||r.record.text.length>65536||r.record?.id!==record.id||r.record.revision!==record.revision||r.record.state!=='approved'||Object.hasOwn(r.record,'sources'))throw Error('page');publish({page:{...r.record,source_count:r.source_count},busy:false});}
+   else{if(r.record_id!==record.id||r.record_revision!==record.revision||r.source_content!=='citation_quotes_only'||!Array.isArray(r.sources)||r.sources.length>64||!r.sources.every(source=>source&&typeof source==='object'&&!Array.isArray(source)&&Object.keys(source).every(k=>['ref','quote','sha256','revision'].includes(k))&&typeof source.ref==='string'&&source.ref.length<=2048&&(!Object.hasOwn(source,'quote')||(typeof source.quote==='string'&&source.quote.length<=16384))&&(!Object.hasOwn(source,'sha256')||(typeof source.sha256==='string'&&/^[a-f0-9]{64}$/i.test(source.sha256)))&&(!Object.hasOwn(source,'revision')||(Number.isSafeInteger(source.revision)&&source.revision>0))))throw Error('evidence');publish({evidence:r.sources,busy:false});}
+  }catch{if(valid())publish({records:[],snapshot:null,next:null,page:null,evidence:null,busy:false,error:'This approved-memory snapshot is unavailable or changed. Refresh explicitly. Project reading requires current consent; no automatic retry.'});}
+ }
+ return{getSnapshot:()=>state,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},currentKey:()=>reviewIdentity(host,epoch).key,select(scope,ownerKey=state.ownerKey){const current=sync();if(disposed||ownerKey!==current.key||!['private','project'].includes(scope))return;generation++;lane=scope;state=empty();for(const fn of listeners)fn();},refresh:(owner=state.ownerKey,rendered=state)=>request('index',owner,rendered),more:(owner=state.ownerKey,rendered=state)=>request('more',owner,rendered),open:(record,owner=state.ownerKey,rendered=state)=>request('page',owner,rendered,record),loadEvidence:(record,owner=state.ownerKey,rendered=state)=>request('evidence',owner,rendered,record),dispose(){disposed=true;generation++;for(const stop of stops)stop();listeners.clear();}};
+}
+export function WikiPage({controller,drafts}){
+ const s=useSyncExternalStore(controller.subscribe,controller.getSnapshot,controller.getSnapshot),[filter,setFilter]=useState('');
+ useLayoutEffect(()=>setFilter(''),[s.ownerKey,s.lane]);
+ if(s.ownerKey!==controller.currentKey())return h('p',null,'Chat ownership changed. Select a scope again.');
+ const query=filter.toLocaleLowerCase(),records=s.records.filter(r=>[r.title,r.domain,r.topic].some(v=>String(v||'').toLocaleLowerCase().includes(query)));
+ return h('section',{style:{padding:'1rem',maxWidth:960}},h('h1',null,'Approved memory wiki'),h('p',null,'Read-only human inspection, not model recall. Approval is a workflow state, not proof of truth. Refreshing may reveal sensitive approved titles and metadata. Full bodies require selecting a record; citation evidence requires a separate click.'),
+  h('div',{style:rowStyle},...['private','project'].map(lane=>h('button',{key:lane,'aria-pressed':s.lane===lane,onClick:()=>controller.select(lane,s.ownerKey)},lane==='private'?'Current-chat private memory':'Consented project memory'))),
+  h('p',null,s.lane?`Selected scope: ${s.lane}. Nothing is fetched until Refresh.`:'Select a scope; no catalog or bodies have been fetched.'),
+  h('button',{disabled:!s.lane||s.busy,onClick:()=>controller.refresh(s.ownerKey,s)},s.busy?'Reading…':'Refresh approved index'),
+  s.error&&h('p',{role:'alert'},s.error),s.snapshot&&h('div',null,h('label',null,'Filter loaded titles, domains and topics ',h('input',{value:filter,onChange:e=>setFilter(e.target.value)})),h('p',null,'This filter searches only loaded metadata, not every record or full text.'),
+   h('ul',null,...records.map(r=>h('li',{key:r.id},h('button',{disabled:s.busy,onClick:()=>controller.open(r,s.ownerKey,s)},r.title||r.id),h('span',null,` · ${r.domain||'unclassified'} / ${r.topic||'no topic'}${r.sensitive?' · Sensitive':''}`)))),
+   s.next&&h('button',{disabled:s.busy,onClick:()=>controller.more(s.ownerKey,s)},'Load next metadata page')),
+  s.page&&h('article',null,h('h2',null,s.page.title),h('p',null,`Approved · revision ${s.page.revision}${s.page.sensitive?' · Sensitive: human inspection only':''}`),h('pre',{style:proseStyle},s.page.text),
+   h('p',null,`${s.page.source_count??0} declared source references. Sources are not automatically opened or fetched.`),h('button',{disabled:s.busy,onClick:()=>controller.loadEvidence(s.page,s.ownerKey,s)},'Read bound citation evidence')),
+  drafts&&s.lane&&h(DraftRecipePanel,{controller:drafts,selected:s.page}),
+  s.evidence&&h('section',{'aria-label':'Bound citation evidence'},h('h2',null,'Declared citation evidence'),h('p',null,'Citation quotes and recorded digests only, not full source snapshots. A digest can establish captured-text identity, not factual truth. Links are inert text.'),h('pre',{style:proseStyle},JSON.stringify(s.evidence,null,2))));
+}
+
+export function createDraftController(host,wiki){
+ const context=()=>{const w=wiki.getSnapshot();return{key:JSON.stringify([wiki.currentKey(),w.ownerKey,w.lane,w.snapshot,w.page?.id,w.page?.revision]),valid:w.ownerKey===wiki.currentKey()&&['private','project'].includes(w.lane),lane:w.lane,snapshot:w.snapshot,page:w.page,session:read(host?.state?.focusedSessionId)};};
+ let identity=context(),generation=0,disposed=false;const listeners=new Set();
+ const empty=()=>({contextKey:identity.key,busy:false,error:'',uncertain:false,preview:null,drafts:[],selected:null,saved:null,attemptedId:null});let state=empty();
+ const publish=patch=>{state={...state,...patch};for(const fn of listeners)fn();};
+ const sync=()=>{const next=context();if(next.key!==identity.key){identity=next;generation++;state=empty();for(const fn of listeners)fn();}return next;};const stop=wiki.subscribe(sync);
+ const summaryValid=d=>d&&typeof d.id==='string'&&d.id.length>0&&d.id.length<=128&&typeof d.title==='string'&&new TextEncoder().encode(d.title).length<=120&&typeof d.created_at==='string'&&d.created_at.length<=128&&Array.isArray(d.record_ids)&&d.record_ids.length>=1&&d.record_ids.length<=4&&d.record_ids.every(v=>typeof v==='string'&&v.length>0&&v.length<=512)&&new Set(d.record_ids).size===d.record_ids.length&&typeof d.include_evidence==='boolean'&&typeof d.sensitive==='boolean';
+ async function run(kind,payload,rendered=state,expected=context().key){const c=sync();if(disposed||!c.valid||c.key!==expected||rendered!==state||state.busy)return;
+  if(kind==='preview'&&(!c.page||!c.snapshot||typeof payload.title!=='string'||new TextEncoder().encode(payload.title).length>120||!payload.title.trim()||typeof payload.include_evidence!=='boolean'))return;
+  if(kind==='save'&&(state.uncertain||payload!==state.preview))return;
+  const stamp=++generation,socket=host.getGateway?.();const valid=()=>!disposed&&sync().key===c.key&&generation===stamp&&(!host.getGateway||host.getGateway()===socket);
+  const params=kind==='preview'?{record_ids:[c.page.id],expected_snapshot:c.snapshot,title:payload.title,include_evidence:payload.include_evidence}:kind==='save'?{preview_token:payload.preview_token,confirm:true}:kind==='get'?{draft_id:payload.id}:{};
+  if(kind==='get'&&!state.drafts.some(d=>d===payload))return;
+  publish({busy:true,error:'',preview:null,selected:null,saved:null,...(kind==='save'?{attemptedId:payload.draft_id}:{}),...(kind==='list'?{drafts:[]}: {})});
+  try{const r=await host.request(`plugin.elm.draft.${c.lane}.${kind}`,{...params,session_id:c.session});if(!valid())return;
+   if(kind==='preview'){if(!Number.isSafeInteger(r.expires_in_seconds)||r.expires_in_seconds<1||r.expires_in_seconds>300||r.lane!==c.lane||r.installable!==false||r.retains_body!==false||typeof r.draft_id!=='string'||!r.draft_id||r.draft_id.length>128||typeof r.preview_token!=='string'||!r.preview_token||r.preview_token.length>128||typeof r.markdown!=='string'||r.markdown.length>65536||!/^[a-f0-9]{64}$/.test(r.sha256)||typeof r.sensitive!=='boolean'||r.include_evidence!==payload.include_evidence||JSON.stringify(r.record_ids)!==JSON.stringify([c.page.id]))throw Error('preview');publish({preview:r,busy:false});}
+   else if(kind==='save'){if(r.saved!==true||!summaryValid(r.draft)||r.draft.id!==payload.draft_id||JSON.stringify(r.draft.record_ids)!==JSON.stringify(payload.record_ids)||r.draft.include_evidence!==payload.include_evidence||r.draft.sensitive!==payload.sensitive)throw Error('save');publish({saved:r.draft,busy:false,uncertain:false});}
+   else if(kind==='list'){if(r.lane!==c.lane||!Array.isArray(r.drafts)||r.drafts.length>16||!r.drafts.every(summaryValid))throw Error('list');publish({drafts:r.drafts,busy:false,uncertain:false});}
+   else{if(!summaryValid(r.draft)||r.draft.id!==payload.id||typeof r.available!=='boolean'||(!r.available&&(Object.hasOwn(r,'markdown')||Object.hasOwn(r,'sha256')))||(r.available&&(typeof r.markdown!=='string'||r.markdown.length>65536||!/^[a-f0-9]{64}$/.test(r.sha256))))throw Error('get');publish({selected:r,busy:false});}
+  }catch{if(valid())publish({busy:false,preview:null,selected:null,saved:null,uncertain:kind==='save'||state.uncertain,error:kind==='save'?'Save outcome is uncertain. Refresh saved recipes to reconcile; do not repeat the save.':'Draft is unavailable or its source changed. Review and request again explicitly.'});}
+ }
+ return{getSnapshot:()=>state,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},currentKey:()=>context().key,preview:(title,include_evidence,rendered=state,key=context().key)=>run('preview',{title,include_evidence},rendered,key),save:(preview=state.preview,rendered=state,key=context().key)=>preview?run('save',preview,rendered,key):undefined,list:(rendered=state,key=context().key)=>run('list',{},rendered,key),get:(draft,rendered=state,key=context().key)=>run('get',draft,rendered,key),cancel(){publish({preview:null});},dispose(){disposed=true;generation++;stop();listeners.clear();}};
+}
+export function DraftRecipePanel({controller,selected}){
+ const s=useSyncExternalStore(controller.subscribe,controller.getSnapshot,controller.getSnapshot),[title,setTitle]=useState(''),[evidence,setEvidence]=useState(false);
+ useLayoutEffect(()=>{setTitle('');setEvidence(false);},[s.contextKey]);
+ if(s.contextKey!==controller.currentKey())return h('p',null,'Source selection changed. Review again.');
+ return h('section',{'aria-label':'Memory-based reference draft'},h('h2',null,'Reference draft from memory'),
+ h('p',null,'Deterministic reference document, not AI-generated expertise or an installed skill. Saving keeps a recipe: selected IDs, title and source pins, not the generated body. Recipes are retained indefinitely; no purge control exists here.'),
+ selected&&h('div',null,h('p',null,`Selected approved source: ${selected.title}${selected.sensitive?' · Sensitive':''}`),h('label',null,'Draft title ',h('input',{value:title,onChange:e=>setTitle(e.target.value)})),h('label',null,h('input',{type:'checkbox',checked:evidence,onChange:e=>setEvidence(e.target.checked)}),'Include declared citation evidence (may contain sensitive quotes; off by default)'),h('button',{disabled:s.busy||!title.trim(),onClick:()=>controller.preview(title,evidence,s,s.contextKey)},'Preview reference draft')),
+ h('button',{disabled:s.busy,onClick:()=>controller.list(s,s.contextKey)},'Refresh saved recipes'),s.error&&h('p',{role:'alert'},s.error),
+ s.preview&&h('div',null,h('h3',null,'Review before saving recipe'),h('p',null,s.preview.sensitive?'Contains sensitive material. Human preview only, not permission for model use or sharing.':'Human preview only; no installation or model call.'),h('pre',{style:proseStyle},s.preview.markdown),h('p',null,'Recipe ID: '+s.preview.draft_id),h('p',null,'Generated text SHA-256: '+s.preview.sha256),h('p',null,'Saving retains the recipe, not this body. Later reads regenerate only while the exact approved source pins remain valid.'),h('button',{disabled:s.busy||s.uncertain,onClick:()=>controller.save(s.preview,s,s.contextKey)},'Confirm saving recipe'),h('button',{disabled:s.busy,onClick:()=>controller.cancel()},'Cancel')),
+ s.attemptedId&&h('p',null,'Last attempted recipe ID: '+s.attemptedId+'. Match this exact ID after refreshing saved recipes; do not infer success from similar titles.'),s.saved&&h('p',{role:'status'},'Recipe saved: '+s.saved.id),h('ul',null,...s.drafts.map(d=>h('li',{key:d.id},h('button',{disabled:s.busy,onClick:()=>controller.get(d,s,s.contextKey)},d.title+' · '+d.id+(d.sensitive?' · Sensitive':''))))),
+ s.selected&&h('div',null,h('h3',null,s.selected.draft.title),s.selected.available?h('pre',{style:proseStyle},s.selected.markdown):h('p',null,'Unavailable: current approved source pins no longer permit regeneration. No retained body is shown.')));
+}
+
+const routingBlockerLabels={credential_route_dispatch_binding_unavailable:'Enrolled credentials are not connected to production dispatch.',production_pinned_dispatch_unavailable:'Production dispatch bound to the reviewed destination is unavailable.',explicit_egress_execution_unavailable:'An explicit, one-use external-processing consent and execution flow is unavailable.',provider_compatibility_unverified:'Provider compatibility has not been verified.',enforceable_cost_bound_unavailable:'An enforceable spending bound is unavailable.',search_result_contract_unavailable:'The model-assisted search result contract is not implemented.'};
+export function createModelPreferencesController(host,epoch=()=>0){
+ let identity=reviewIdentity(host,epoch),generation=0,disposed=false;const listeners=new Set(),stops=[];
+ const empty=()=>({ownerKey:identity.key,status:null,preview:null,busy:false,error:identity.error,uncertain:false});let state=empty();
+ const publish=p=>{state={...state,...p};for(const fn of listeners)fn();};
+ const sync=()=>{const next=reviewIdentity(host,epoch);if(next.key!==identity.key){identity=next;generation++;state=empty();for(const fn of listeners)fn();}return next;};
+ for(const atom of Object.values(host?.state||{}))if(atom?.subscribe)stops.push(atom.subscribe(sync));
+ const selectionValid=v=>{if(v===null)return true;if(!v||typeof v!=='object'||Object.keys(v).length!==3||!['provider','model','endpoint'].every(k=>typeof v[k]==='string')||!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(v.provider)||!/^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$/.test(v.model)||v.endpoint.length>256||/[^\x21-\x7e]|[\\%]/.test(v.endpoint))return false;try{const u=new URL(v.endpoint);return u.protocol==='https:'&&!u.username&&!u.password&&!u.search&&!u.hash&&!u.hostname.includes(':')&&['/v1/chat/completions','/chat/completions','/api/v1/chat/completions','/openai/v1/chat/completions'].includes(u.pathname);}catch{return false;}};
+ const sameSelection=(a,b)=>a===null||b===null?a===b:selectionValid(a)&&selectionValid(b)&&a.provider===b.provider&&a.model===b.model&&new URL(a.endpoint).href===new URL(b.endpoint).href;
+ const disabled=r=>r?.dispatch_supported===false&&r.external_egress_enabled===false;
+ const readinessValid=r=>r.routing_readiness===undefined||(['search','organizer'].every(role=>{const v=r.routing_readiness?.[role];return v&&typeof v.selection_saved==='boolean'&&v.selection_saved===(r.roles?.[role]!==null)&&v.dispatch_supported===false&&Array.isArray(v.blockers)&&v.blockers.length<=6&&v.blockers.every(code=>Object.hasOwn(routingBlockerLabels,code));}));
+ const statusValid=r=>disabled(r)&&readinessValid(r)&&r.scope==='current_chat'&&Number.isSafeInteger(r.revision)&&r.revision>=0&&typeof r.context_key==='string'&&/^[a-f0-9]{64}$/.test(r.context_key)&&typeof r.initialized==='boolean'&&typeof r.setup_required==='boolean'&&r.roles&&selectionValid(r.roles.search)&&selectionValid(r.roles.organizer);
+ async function run(kind,payload,rendered=state,ownerKey=state.ownerKey){const c=sync();if(disposed||c.error||ownerKey!==c.key||rendered!==state||state.busy)return;
+  if(kind==='preview'&&!selectionValid(payload.selection)){publish({error:'Use bounded provider/model identifiers and a credential-free HTTPS chat-completions endpoint; do not enter secrets.'});return;}
+  if(kind==='preview'&&(!state.status||!state.status.initialized||state.status.setup_required||state.uncertain||!['search','organizer'].includes(payload.role)||!selectionValid(payload.selection)))return;
+  if(kind==='apply'&&(!payload||payload!==state.preview||state.uncertain))return;
+  const stamp=++generation,socket=host.getGateway?.(),oldStatus=state.status;const valid=()=>!disposed&&sync().key===c.key&&generation===stamp&&(!host.getGateway||host.getGateway()===socket);
+  const params=kind==='status'?{}:kind==='preview'?{role:payload.role,selection:payload.selection,expected_revision:oldStatus.revision,expected_context:oldStatus.context_key}:{preview_token:payload.preview_token,confirm:true};
+  publish({busy:true,error:'',preview:null,...(kind==='status'||kind==='apply'?{status:null}:{})});
+  try{const r=await host.request('plugin.elm.model_preferences.'+kind,{...params,session_id:c.session});if(!valid())return;
+   if(kind==='preview'){if(!disabled(r)||r.role!==payload.role||!selectionValid(r.selection)||!sameSelection(r.selection,payload.selection)||!selectionValid(r.previous_selection)||!sameSelection(r.previous_selection,oldStatus.roles[payload.role])||typeof r.preview_token!=='string'||!r.preview_token||r.preview_token.length>128||!Number.isSafeInteger(r.expires_in_seconds)||r.expires_in_seconds<1||r.expires_in_seconds>300)throw Error('preview');publish({preview:r,busy:false});}
+   else{const status=kind==='status'?r:r.status;if(kind==='apply'&&(r.saved!==true||!statusValid(status)||!sameSelection(status.roles[payload.role],payload.selection)||status.revision<=oldStatus.revision)||!statusValid(status))throw Error('status');publish({status,busy:false,uncertain:false});}
+  }catch{if(valid())publish({status:null,preview:null,busy:false,uncertain:kind==='apply'||state.uncertain,error:kind==='apply'?'Preference save outcome is uncertain. Refresh to reconcile; do not repeat the action.':'Preferences unavailable or changed. Refresh explicitly; no model request was made.'});}
+ }
+ return{getSnapshot:()=>state,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},currentKey:()=>reviewIdentity(host,epoch).key,refresh:(s=state,key=state.ownerKey)=>run('status',null,s,key),preview:(role,selection,s=state,key=state.ownerKey)=>run('preview',{role,selection},s,key),apply:(p=state.preview,s=state,key=state.ownerKey)=>p?run('apply',p,s,key):undefined,cancel(){publish({preview:null});},dispose(){disposed=true;generation++;for(const stop of stops)stop();listeners.clear();}};
+}
+export function ModelPreferencesPage({controller}){
+ const s=useSyncExternalStore(controller.subscribe,controller.getSnapshot,controller.getSnapshot),[role,setRole]=useState('search'),[provider,setProvider]=useState(''),[model,setModel]=useState(''),[endpoint,setEndpoint]=useState('');
+ useLayoutEffect(()=>{setRole('search');setProvider('');setModel('');setEndpoint('');},[s.ownerKey]);
+ if(s.ownerKey!==controller.currentKey())return h('p',null,'Chat ownership changed. Refresh preferences.');
+ const status=s.status,blocked=s.busy||s.uncertain||!status?.initialized||status?.setup_required;
+ return h('section',{style:{padding:'1rem',maxWidth:900}},h('h1',null,'Memory model preferences'),h('p',{role:'note'},'Routing unavailable. Search and organizer selections are saved intentions only, not active models. No execution, external processing, catalog lookup or connection test occurs. Saving is not consent to send memory.'),
+ h('button',{disabled:s.busy,onClick:()=>controller.refresh(s,s.ownerKey)},s.busy?'Waiting…':'Refresh saved preferences'),s.error&&h('p',{role:'alert'},s.error),
+ status&&h('div',null,h('p',null,'Scope: this chat only. Current chat model and existing recall/capture settings are unchanged.'),status.setup_required&&h('p',null,'First initialize private memory through its separate explicit setup action. This page does not create a store.'),
+ h('h2',null,'Saved intentions'),...['search','organizer'].map(key=>h('div',{key},h('h3',null,key==='search'?'Memory search':'Memory organizer'),h('pre',{style:proseStyle},status.roles[key]?JSON.stringify(status.roles[key],null,2):'Not selected'),status.routing_readiness?.[key]?h('div',null,h('p',null,(status.routing_readiness[key].selection_saved?'Preference saved':'No preference saved')+' · execution unavailable'),h('ul',null,...status.routing_readiness[key].blockers.map(code=>h('li',{key:code},routingBlockerLabels[code])))):h('p',null,'Role-specific readiness is not reported by this host. Execution remains unavailable.'))),
+ h('label',null,'Role ',h('select',{value:role,onChange:e=>setRole(e.target.value)},h('option',{value:'search'},'Memory search'),h('option',{value:'organizer'},'Memory organizer'))),
+ ...[['Provider identifier',provider,setProvider],['Model identifier',model,setModel],['HTTPS chat-completions endpoint',endpoint,setEndpoint]].map(([label,value,set])=>h('label',{key:label,style:{display:'block'}},label,h('input',{value,onChange:e=>set(e.target.value),autoComplete:'off'}))),
+ h('p',null,'No model calls or charges occur now. Future execution requires separately reviewed pricing, spending limits, recipient and exact data consent; no cost is estimated here.'),
+ h('p',null,'Declared values are unverified: availability, credentials, capability, cost and suitability are not checked. Do not paste keys or secrets. No reasoning-effort support is assumed. Endpoint must be an allowed HTTPS chat-completions path without username, password, query or fragment.'),
+ h('button',{disabled:blocked||!provider||!model||!endpoint,onClick:()=>controller.preview(role,{provider,model,endpoint},s,s.ownerKey)},'Review preference'),h('button',{disabled:blocked,onClick:()=>controller.preview(role,null,s,s.ownerKey)},'Review clearing selected role')),
+ s.preview&&h('div',{'aria-label':'Preference confirmation'},h('h2',null,'Confirm '+s.preview.role+' preference'),h('h3',null,'Previous'),h('pre',{style:proseStyle},JSON.stringify(s.preview.previous_selection,null,2)),h('h3',null,'Proposed'),h('pre',{style:proseStyle},JSON.stringify(s.preview.selection,null,2)),h('p',null,'Save this intention locally for this chat. It does not configure a working route, authorize model calls, or enable a fallback.'),h('button',{disabled:s.busy||s.uncertain,onClick:()=>controller.apply(s.preview,s,s.ownerKey)},'Confirm saving preference'),h('button',{disabled:s.busy,onClick:()=>controller.cancel()},'Cancel')));
 }
 
 export default {
-  id: "elm",
-  name: "Memory",
-  defaultEnabled: false,
+  id: 'elm', name: 'ELM private review', defaultEnabled: false,
   register(ctx) {
-    const controller = createMemoryController(ctx);
-    const privateControls = createPrivateController(ctx);
-    ctx.onDispose?.(() => privateControls.dispose());
-    const privateRender = () => h(PrivatePage,{controller:privateControls});
-    if(typeof ctx.registerSettingsPage === "function"){
-      ctx.registerSettingsPage({id:"private-settings",title:"Private memory",icon:"lock",order:20,render:privateRender});
-    }else if(SDK.SETTINGS_PLUGINS_AREA){
-      ctx.register({id:"private-settings",area:SDK.SETTINGS_PLUGINS_AREA,title:"Private memory",data:{icon:"lock"},render:privateRender});
-    }
-    const important = createImportantController(ctx), updates = createUpdatesController(ctx);
-    ctx.onDispose?.(() => {important.dispose();updates.dispose();});
-    const importantRender = () => h(ImportantPage,{controller:important,updates,ctx});
-    if(SDK.ROUTES_AREA && SDK.SIDEBAR_NAV_AREA){
-      ctx.register({id:"important-page",area:SDK.ROUTES_AREA,data:{path:"/elm-important"},render:importantRender});
-      ctx.register({id:"important-nav",area:SDK.SIDEBAR_NAV_AREA,data:{path:"/elm-important",label:"Important results",codicon:"bookmark"}});
-    }else ctx.register({id:"important-pane",area:"panes",title:"Important results",data:{placement:"right",width:"380px"},render:importantRender});
-    ctx.register({id:"important-count",area:"statusBar.right",order:81,render:()=>h(ImportantChip,{controller:important})});
-    if(SDK.TRANSCRIPT_DIRECTIVE_AREA)ctx.register({id:"important-directive",area:SDK.TRANSCRIPT_DIRECTIVE_AREA,
-      data:{name:"elm-result",render:({attrs})=>h(ImportantDirective,{attrs,controller:important,ctx})}});
-    if(typeof SDK.host?.onEvent === "function"){
-      // A turn ending is a refresh opportunity, never a task-completion claim.
-      const stop=SDK.host.onEvent('message.complete',event=>{
-        const state=SDK.host.state || {}, current=productIdentity(SDK.host);
-        // Public gateway events may name the runtime or durable session; absent
-        // legacy tags are ambiguous, but explicit foreign ownership is not.
-        if (current.error || event?.profile && event.profile !== current.profile ||
-            event?.connectionId && event.connectionId !== value(state.connectionId) ||
-            event?.session_id && ![current.session,value(state.focusedSessionId)].includes(event.session_id)) return;
-        if(!important.getSnapshot().unconfirmed)void important.refresh();
-      });
-      if(typeof stop === "function")ctx.onDispose?.(stop);
-    }
-    ctx.onDispose?.(() => controller.dispose());
-    const render = () => h(MemoryPage, { controller });
+    const updates=createUpdateController(SDK.host,SDK.gatewayActivationEpoch||(()=>0));
+    ctx.onDispose(()=>updates.dispose());
+    ctx.registerSettingsPage?.({id:"automatic-updates",title:"ELM automatic updates",render:()=>h(UpdatePolicyPage,{controller:updates})});
+    const wiki=createWikiController(SDK.host,SDK.gatewayActivationEpoch||(()=>0));
+    const drafts=createDraftController(SDK.host,wiki);
+    ctx.onDispose(()=>{drafts.dispose();wiki.dispose();});
+    ctx.registerSettingsPage?.({id:"approved-wiki",title:"Approved memory wiki",render:()=>h(WikiPage,{controller:wiki,drafts})});
+    const modelPreferences=createModelPreferencesController(SDK.host,SDK.gatewayActivationEpoch||(()=>0));
+    ctx.onDispose(()=>modelPreferences.dispose());
+    ctx.registerSettingsPage?.({id:"memory-model-preferences",title:"Memory model preferences",render:()=>h(ModelPreferencesPage,{controller:modelPreferences})});
+    const lexicalSearch=createLexicalSearchController(SDK.host,SDK.gatewayActivationEpoch||(()=>0));
+    ctx.onDispose(()=>lexicalSearch.dispose());
+    ctx.registerSettingsPage?.({id:'scoped-lexical-search',title:'Scoped lexical search',render:()=>h(LexicalSearchPage,{controller:lexicalSearch})});
+    registerRichPresentation(ctx);
+    registerImportancePresentation(ctx);
+    registerMessagePresentation(ctx);
+    const controller = createReviewController(SDK.host, SDK.gatewayActivationEpoch || (() => 0));
+    ctx.onDispose(() => controller.dispose());
+    const render = () => h(ReviewPage, { controller });
+    const folderPreferences=createChatFolderPreferences(ctx), folderSupported=typeof SDK.CHAT_FOLDERS_AREA==='string';
+    const unbindFolders=bindNativeChatFolders(ctx,controller,folderPreferences,folderSupported);
+    ctx.onDispose(()=>{unbindFolders();folderPreferences.dispose();});
+    ctx.registerSettingsPage?.({id:'chat-folders',title:'Folders for chats',render:()=>h(ChatFoldersPage,{key:controller.currentKey(),controller,preferences:folderPreferences,supported:folderSupported})});
+    const projectController = createReviewController(SDK.host, SDK.gatewayActivationEpoch || (() => 0), 'project');
+    ctx.onDispose(() => projectController.dispose());
+    const renderProject = () => h(ReviewPage, { controller: projectController, project: true });
     if (SDK.ROUTES_AREA && SDK.SIDEBAR_NAV_AREA) {
-      ctx.register({
-        id: "memory-page",
-        area: SDK.ROUTES_AREA,
-        data: { path: "/elm-memory" },
-        render,
-      });
-      ctx.register({
-        id: "memory-nav",
-        area: SDK.SIDEBAR_NAV_AREA,
-        data: { path: "/elm-memory", label: "Memory", codicon: "book" },
-      });
-    } else
-      ctx.register({
-        id: "memory-pane",
-        area: "panes",
-        title: "Memory",
-        data: { placement: "right", width: "380px" },
-        render,
-      });
-    ctx.register({
-      id: "memory-boundary",
-      area: "statusBar.right",
-      order: 80,
-      render: () => h(BoundaryChip, { controller }),
-    });
-    if (typeof ctx.rest === "function") void controller.refresh();
+      ctx.register({ id: 'project-review-page', area: SDK.ROUTES_AREA, data: { path: '/elm-project-review' }, render: renderProject });
+      ctx.register({ id: 'project-review-nav', area: SDK.SIDEBAR_NAV_AREA, data: { path: '/elm-project-review', label: 'Project memory', codicon: 'folder' } });
+      ctx.register({ id: 'private-review-page', area: SDK.ROUTES_AREA, data: { path: '/elm-private-review' }, render });
+      ctx.register({ id: 'private-review-nav', area: SDK.SIDEBAR_NAV_AREA,
+        data: { path: '/elm-private-review', label: 'Private memory', codicon: 'book' } });
+    } else if (typeof ctx.registerSettingsPage === 'function') {
+      ctx.registerSettingsPage({ id: 'project-review', title: 'Project memory', icon: 'folder', render: renderProject });
+      ctx.registerSettingsPage({ id: 'private-review', title: 'Private memory', icon: 'book', render });
+    }
   },
 };
+
+/** Explicit user-invoked lookup; never automatic recall or model execution. */
+export function createLexicalSearchController(host,epoch=()=>0){
+ let identity=reviewIdentity(host,epoch),generation=0,disposed=false;
+ const empty=()=>({ownerKey:identity.key,lane:null,query:'',result:null,packet:null,busy:false,error:identity.error});let state=empty();const listeners=new Set(),stops=[];
+ const publish=patch=>{state={...state,...patch};for(const f of listeners)f()};
+ const sync=()=>{const next=reviewIdentity(host,epoch);if(next.key!==identity.key){identity=next;generation++;state=empty();for(const f of listeners)f()}return next};
+ for(const atom of Object.values(host?.state||{}))if(atom?.subscribe)stops.push(atom.subscribe(sync));
+ function edit(patch,rendered){sync();if(disposed||state!==rendered||identity.error)return;generation++;publish({...patch,result:null,packet:null,busy:false,error:''})}
+ return {getSnapshot:()=>state,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn)},currentKey:()=>reviewIdentity(host,epoch).key,
+  select(lane,rendered=state){if(['private','project'].includes(lane))edit({lane},rendered)},
+  setQuery(query,rendered=state){if(typeof query==='string')edit({query},rendered)},
+  async search(rendered=state){const owner=sync();if(disposed||owner.error||state!==rendered||state.busy||!state.lane)return;const query=state.query,lane=state.lane;if(!query||new TextEncoder().encode(query).length>512){publish({error:'Enter a query of 1–512 UTF-8 bytes. Punctuation-only queries are unsupported.',result:null,packet:null});return}
+   const stamp=++generation,socket=host.getGateway?.();const valid=()=>!disposed&&sync().key===owner.key&&generation===stamp&&state.lane===lane&&state.query===query&&(!host.getGateway||host.getGateway()===socket);
+   publish({busy:true,error:'',result:null,packet:null});
+   try{const packet=await host.request(`plugin.elm.search.${lane}.query`,{session_id:owner.session,query});if(!valid())return;
+    if(typeof packet!=='string'||new TextEncoder().encode(packet).length>131072)throw Error();const r=JSON.parse(packet);
+    if(!exactKeys(r,['schema','lane','algorithm','tokenizer','token_limit','snapshot_key','status','eligible_count','matched_count','omitted_count','records'])||r.schema!==1||r.lane!==lane||r.algorithm!=='literal_overlap_v1'||r.tokenizer!=='o200k_base'||r.token_limit!==700||typeof r.snapshot_key!=='string'||!/^[a-f0-9]{64}$/.test(r.snapshot_key)||!['matched','partial','evidence_exceeds_budget','no_match'].includes(r.status)||!['eligible_count','matched_count','omitted_count'].every(k=>Number.isSafeInteger(r[k])&&r[k]>=0)||r.matched_count>r.eligible_count||r.omitted_count>r.matched_count||!Array.isArray(r.records)||r.records.length>r.matched_count||!r.records.every(row=>row&&typeof row.id==='string'&&typeof row.title==='string'&&typeof row.text==='string'&&row.state==='approved'&&row.sensitive===false&&Array.isArray(row.sources)))throw Error();
+    if(r.omitted_count!==r.matched_count-r.records.length||(r.status==='matched'&&(!r.records.length||r.omitted_count))||(r.status==='partial'&&(!r.records.length||!r.omitted_count)))throw Error();
+    if((r.status==='no_match'&&(r.records.length||r.matched_count))||(r.status==='evidence_exceeds_budget'&&(r.records.length||!r.matched_count)))throw Error();
+    publish({busy:false,result:r,packet});
+   }catch{if(valid())publish({busy:false,result:null,packet:null,error:'Search unavailable or rejected. Check current authorization, project consent and pinned tokenizer installation. No fallback, automatic download or retry; this is not a no-match result.'})}
+  },dispose(){disposed=true;generation++;for(const stop of stops)stop();state=empty();listeners.clear()}
+ };
+}
+export function LexicalSearchPage({controller}){
+ const s=useSyncExternalStore(controller.subscribe,controller.getSnapshot,controller.getSnapshot);
+ if(s.ownerKey!==controller.currentKey())return h('p',null,'Current chat changed. Search again in the intended scope.');
+ const labels={matched:'Literal matches delivered.',partial:'Some matching records could not fit intact.',evidence_exceeds_budget:'Matching evidence exists, but no whole matching record fits this packet budget.',no_match:'No literal matches. This does not prove the answer is absent.'};
+ return h('section',{style:sectionStyle},h('h2',null,'Scoped lexical search'),
+  h('p',null,'Literal matches may not answer your question. There is no semantic abstention: irrelevant matches can still be returned when no answer exists. This is user-invoked search, not automatic model memory. Sensitive and ineligible records are excluded; project access requires existing consent.'),
+  h('p',null,'Setup if unavailable: install the optional tiktoken==0.14.0 dependency and pinned official o200k_base vocabulary on the host; set the ELM plugin setting search_tokenizer_vocab to its absolute local file path, then reload the plugin. Missing or mismatched assets fail closed. The first search can be slower while the local tokenizer loads. This page does not install or download anything.'),
+  button('Private',()=>controller.select('private',s),s.busy),button('Project',()=>controller.select('project',s),s.busy),h('p',null,'Selected scope: ',s.lane||'Choose explicitly'),
+  h('label',null,'Literal query',h(Input,{value:s.query,onChange:e=>controller.setQuery(e.target.value,s)})),button('Search authorized records',()=>controller.search(s),s.busy||!s.lane),
+  s.error&&h('p',{role:'alert'},s.error),
+  s.result&&h('div',null,h('p',null,labels[s.result.status]),h('p',null,'Reference budget: 700 o200k_base tokens for the entire returned JSON memory packet. This is not provider framing, a full model prompt, billed tokens or a monetary limit.'),
+   h('p',null,`Eligible: ${s.result.eligible_count}; literal matches: ${s.result.matched_count}; omitted: ${s.result.omitted_count}. Whole records and declared citations are not truncated. Dependency metadata does not guarantee all supporting dependency bodies are delivered.`),
+   ...s.result.records.map(row=>h('article',{key:row.id,style:sectionStyle},h('h3',null,row.title),h('pre',{style:proseStyle},row.text),h('p',null,'Record ID: ',row.id),h('details',null,h('summary',null,'Declared citations · not independent verification'),h('pre',{style:proseStyle},JSON.stringify(row.sources,null,2))))),
+   h('details',null,h('summary',null,'Exact returned packet · untrusted reference data'),h('pre',{style:proseStyle},s.packet))));
+}
