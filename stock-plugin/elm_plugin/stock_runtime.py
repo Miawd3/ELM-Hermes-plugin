@@ -5,7 +5,10 @@ from pathlib import Path
 from .stock_store import Store, Denied, session_key, text, KINDS
 from .public_search_agent import search
 
-HELP = ('ELM: /elm on | off | status | pending [offset] | list [offset] | sources [offset]\n'
+HELP = ('ELM: /elm help | diagnostics (no memory or permission checks)\n'
+        'Desktop/local setup: use the exact-session local grant CLI in the active Hermes profile.\n'
+        'A grant is not created by viewing help or diagnostics. Desktop/local: /elm on cannot grant access; rerun the CLI grant after /elm off.\n'
+        '/elm on | off | status | pending [offset] | list [offset] | sources [offset]\n'
         '/elm project <name|off> · /elm user on|off\n'
         '/elm capture on|off · /elm agent on|off · /elm organizer on|off\n'
         '/elm organize <source-id> (sends that source to the organizer model)\n'
@@ -63,10 +66,29 @@ class Runtime:
         return self._recall(sid,query,agent)
 
     def command(self,raw_args,*,session_id='',platform='',**kwargs):
+        # Only exact informational routes bypass authorization. Never touch Store
+        # here: even its public connection factory can create storage/schema.
+        if not isinstance(raw_args, str):
+            return encode({'error':'invalid_command'})
+        try:
+            parts = shlex.split(raw_args)
+        except ValueError:
+            return encode({'error':'invalid_command'})
+        if not parts or parts == ['help']:
+            return HELP
+        if parts == ['diagnostics']:
+            supported = isinstance(platform, str) and platform in ('local','gui','desktop','cli','tui')
+            valid_session = isinstance(session_id, str) and bool(session_id) and len(session_id) <= 512
+            return encode({
+                'diagnostic_version':1,
+                'surface_supported':supported,
+                'current_session_available':valid_session,
+                'exact_session_cli_required':platform == 'local',
+                'authorization':'not_checked',
+                'storage':'not_opened',
+                'note':'Context only. This does not verify installation, active profile, grant, expiry, or memory access. Use /elm status after granting this exact chat.'})
         try:
             sid = self.sid(session_id,platform)
-            parts = shlex.split(raw_args)
-            if not parts or parts[0] == 'help': return HELP
             verb,args = parts[0],parts[1:]
             if platform == 'local' and verb in ('on','project','user','capture','agent','organizer'):
                 raise Denied('change_permissions_with_local_grant_cli')

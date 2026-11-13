@@ -1,3 +1,9 @@
+## Pre-grant help and diagnostics (candidate)
+
+`/elm help` lists commands without reading memory or opening storage. `/elm diagnostics` reports only whether the supplied current-chat identifier and surface look supported. It does **not** inspect the database, verify an active profile/grant, or report enabled settings, memory counts, or other chats. `authorization: not_checked` is not permission to use memory. After granting the exact chat using the CLI in the correct Hermes profile, `/elm status` remains the permission-gated settings check.
+
+These two informational commands do not fix a missing or expired grant. All memory operations retain their existing authorization. Unsupported contexts may read static help but cannot gain memory access. Other denied memory commands retain the existing storage-opening behavior; this change only guarantees non-mutating help/diagnostics and malformed-command parsing.
+
 # ELM for stock Hermes — candidate
 
 ## Install

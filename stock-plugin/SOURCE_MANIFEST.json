@@ -1,7 +1,7 @@
 {
   "LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
   "NOTICE": "93eea460d933dce5cbfa1a1542aecb859c83b8b17d70571ce7b291f9a248fc26",
-  "README.md": "7ded6facefecaed4a18ce61166c5d0a8213f85d52362a50820ba39319b91e7bd",
+  "README.md": "0fd6de82fae6089028f2d3569dc59e7cd5136ebfd993890d985006680d37b13e",
   "__init__.py": "e31ee32ac84b0a89afbe8ef1bf2bc4babecfbe00d2e2469d96581c31b64a38ad",
   "desktop/identity.js": "17aaf5ce58ed869a05281b5487c8be97c87a1e9367a797df5957a8207c409b2d",
   "desktop/plugin.js": "e4375ce705121038238df51102ab8b0f75baaff5bb0f8e04ecd44754ed63dfca",
@@ -10,7 +10,7 @@
   "elm_plugin/local_grant.py": "26ba8846da742cc34887555a67d65e876b5646315ac01ae73941c53c650822a0",
   "elm_plugin/public_search_agent.py": "e8d779f0570b0fbd07b033225a166f705342c8c23ce0d271a79e5bef2e44f0be",
   "elm_plugin/stock_organizer.py": "3fdcb87f9072a511136fd72f54350d51c8b9bb9f3a6895cfa15586b4b7b86dc3",
-  "elm_plugin/stock_runtime.py": "1cb76c394c677d17baf1c8360b4546cd1e63dbe549e0e80b85f782e5cefdaa02",
+  "elm_plugin/stock_runtime.py": "2b4a455945c3bc0417f3403cec695b4dd960b72c6f782e354730850e407c5fce",
   "elm_plugin/stock_store.py": "56c26b397f165771a10016400337c773210424540a7637329777645a047e42ee",
   "evidence/LOCKED_UI_REVIEW.md": "9bc9af30380507a0a65e98fe06ea1f2b6d4f40153bcf2bd12235ad5ec10091ad",
   "evidence/desktop-identity.log": "c5a08e4a174c2ec1df3e48cd2189305e6b218956540c51fcaf5db3e9261c84e4",
@@ -26,6 +26,10 @@
   "evidence/local-grant-followup.md": "cb87fc38176d3acd6f56d21038310796d1316257100bf40dbe47852b4f8fbb9b",
   "evidence/recall-finalization.md": "c4f281a9ac49f1267a4d50ac974d1637e7a4fdadab56909302886e44ba19fa6b",
   "evidence/rich-ui-check.md": "50a31d0df9421af105072d94778658587e5278574ba10b7188b8c960c0422ba2",
+  "evidence/safe-diagnostics-independent-review.md": "4015a9a160b51db529f8dc2183aa5188f30ae4e6ed239e12155cb395a367e423",
+  "evidence/safe-diagnostics-js.log": "1b5db223a864f28c71d3abacf4bee459e8a93b94f43a7e3cf77dbce9bc4950ed",
+  "evidence/safe-diagnostics-review.md": "98a529398ad44d57a746265a1d19def3542a97e5a50c168cf1a4ecbdfafd8920",
+  "evidence/safe-diagnostics-tests.log": "49456548c7220c7fc35c531b7a0ccdef6fb966b9ac6329d5325d482bf2f941a6",
   "evidence/search-ranking-baseline.py": "1b2faac7891d8422bc898e8018a9d55174afa34f07750e440ebeecbdbddaedef",
   "evidence/search-ranking-followup.md": "421fd65c74f04d59e55526a6b0dcc265a7c5a8d705cd71d4e43f43b82af5e0b4",
   "evidence/search-ranking-independent-check.py": "61cd775cb19a145a66cb258f9bfc506f003ad3c2eb4518d5b5b2fbb0cc9e2ed4",
@@ -54,6 +58,7 @@
   "tests/test_organizer.py": "1cb4124eea1e0f813f5116a07c7e9bdd7fd0ff43d0420eb583ad575393d7a7a3",
   "tests/test_public_search_agent.py": "9ede34abd9f1e6775ae7575dadd31d410ad98b80016fc52f6164f2e89d4608ac",
   "tests/test_recall_finalization.py": "1c245dbd6381918e65c9818bf6729bcd0cd732a466f756ccf8ce54b4372883c8",
+  "tests/test_safe_diagnostics.py": "0da95540aaa7aed015b7a4788c196818281293cff71701ea1d1509462f5bf07a",
   "tests/test_search_ranking.py": "8875500d2ce038c7aea419176f2ed1a781604977f55bffad63ff0be5ef9c5265",
   "tests/test_stock.py": "19b9f350966a0e8cb2e7d7155f6dacd8a71852e9475609ad783b3d18b51a4af2"
 }
