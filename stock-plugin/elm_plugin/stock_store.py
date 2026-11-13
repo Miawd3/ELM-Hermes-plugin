@@ -71,6 +71,12 @@ class Store:
             db.execute("ALTER TABLE stock_records ADD COLUMN search_text TEXT NOT NULL DEFAULT ''")
             for rid,content,tags in db.execute('SELECT id,content,tags FROM stock_records').fetchall():
                 db.execute('UPDATE stock_records SET search_text=? WHERE id=?',((content+' '+tags).casefold(),rid))
+        # Persistent identity and monotonic content generation fence in-flight reads.
+        db.execute("CREATE TABLE IF NOT EXISTS stock_read_epoch (singleton INTEGER PRIMARY KEY CHECK(singleton=1), identity TEXT NOT NULL, generation INTEGER NOT NULL)")
+        db.execute("INSERT OR IGNORE INTO stock_read_epoch VALUES(1,?,0)",(uuid.uuid4().hex,))
+        for event in ('INSERT','UPDATE','DELETE'):
+            db.execute("CREATE TRIGGER IF NOT EXISTS stock_record_epoch_"+event.lower()+
+                       " AFTER "+event+" ON stock_records BEGIN UPDATE stock_read_epoch SET generation=generation+1 WHERE singleton=1; END")
         db.commit()
         return db
 
@@ -95,6 +101,41 @@ class Store:
     def authorized_settings(self, sid):
         with closing(self.open()) as db:
             return self.state(db,sid)
+
+    def read_stamp(self, sid):
+        """Capture policy and content version together in this profile's database."""
+        with closing(self.open()) as db:
+            db.execute('BEGIN')
+            state = self.state(db,sid)
+            identity,generation = db.execute('SELECT identity,generation FROM stock_read_epoch WHERE singleton=1').fetchone()
+            return dict(state, store_identity=identity, content_generation=generation)
+
+    def finalize_records(self, sid, stamp, records, materialize):
+        """Linearization point for recall. No model/network call inside this lock.
+
+        Changes committed before this point invalidate the request. Already returned
+        text cannot be revoked; callers must not interpret this as remote erasure.
+        """
+        with closing(self.open()) as db, db:
+            db.execute('BEGIN IMMEDIATE')
+            state = self.state(db,sid)
+            if state['revision'] != stamp['revision']:
+                raise Denied('scope_changed_retry')
+            identity,generation = db.execute('SELECT identity,generation FROM stock_read_epoch WHERE singleton=1').fetchone()
+            if identity != stamp['store_identity'] or generation != stamp['content_generation']:
+                raise Denied('memory_changed_retry')
+            scopes = self.scopes(sid,state)
+            for record in records:
+                row = db.execute('SELECT id,kind,content,tags,source_id,scope,status FROM stock_records WHERE id=?',(record['id'],)).fetchone()
+                if not row or row[6]!='approved' or row[5] not in scopes:
+                    raise Denied('memory_changed_retry')
+                current = dict(id=row[0],kind=row[1],text=row[2],tags=json.loads(row[3]),source_id=row[4],scope=row[5].split(':')[0])
+                if current != record:
+                    raise Denied('memory_changed_retry')
+            result = materialize(records)
+            # Time-based expiry can advance without a SQLite mutation.
+            self.state(db,sid)
+            return result
 
     def settings(self, sid, changes=None):
         with closing(self.open()) as db, db:

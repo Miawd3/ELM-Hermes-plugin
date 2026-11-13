@@ -10,8 +10,8 @@
   "elm_plugin/local_grant.py": "26ba8846da742cc34887555a67d65e876b5646315ac01ae73941c53c650822a0",
   "elm_plugin/public_search_agent.py": "e8d779f0570b0fbd07b033225a166f705342c8c23ce0d271a79e5bef2e44f0be",
   "elm_plugin/stock_organizer.py": "3fdcb87f9072a511136fd72f54350d51c8b9bb9f3a6895cfa15586b4b7b86dc3",
-  "elm_plugin/stock_runtime.py": "1e5c0a76667a273b46f2223f43224914543b0a54c92d362053a640053f9e50f1",
-  "elm_plugin/stock_store.py": "96a6b01f7405470469b44db4654b76ef4cd6ad2cc1c77648540306c46f41fd2f",
+  "elm_plugin/stock_runtime.py": "1cb76c394c677d17baf1c8360b4546cd1e63dbe549e0e80b85f782e5cefdaa02",
+  "elm_plugin/stock_store.py": "56c26b397f165771a10016400337c773210424540a7637329777645a047e42ee",
   "evidence/desktop-identity.log": "c5a08e4a174c2ec1df3e48cd2189305e6b218956540c51fcaf5db3e9261c84e4",
   "evidence/desktop-rich.log": "24c7d59eeedfb9c4c9b674c871a327dde85a4ac7e27ecaf3cca0ec7132bbbb6b",
   "evidence/fresh-published-install.log": "5b9d0cf9b1f496d052763fdb2bddf5e9241ba94c717c11a84323cc1fe86a8536",
@@ -23,6 +23,7 @@
   "evidence/independent-ranking-review/check_rank.py": "ddc8ecfd5b5d2555a66ab30078c7d6b0bbf3fbdd5952ba639f4cb03dd02daef4",
   "evidence/independent-ranking-review/unit-tests.log": "3eb884062e5e5263c0ebf72fdc7249034e1bf21a240e258478c6b3cf012dad11",
   "evidence/local-grant-followup.md": "cb87fc38176d3acd6f56d21038310796d1316257100bf40dbe47852b4f8fbb9b",
+  "evidence/recall-finalization.md": "c4f281a9ac49f1267a4d50ac974d1637e7a4fdadab56909302886e44ba19fa6b",
   "evidence/rich-ui-check.md": "50a31d0df9421af105072d94778658587e5278574ba10b7188b8c960c0422ba2",
   "evidence/search-ranking-baseline.py": "1b2faac7891d8422bc898e8018a9d55174afa34f07750e440ebeecbdbddaedef",
   "evidence/search-ranking-followup.md": "421fd65c74f04d59e55526a6b0dcc265a7c5a8d705cd71d4e43f43b82af5e0b4",
@@ -49,6 +50,7 @@
   "tests/test_local_grant_cli.py": "ff4450a274dabfe875503b9a4c20edf6bfccdc7d201b5a4dac5f86014ef4606f",
   "tests/test_organizer.py": "1cb4124eea1e0f813f5116a07c7e9bdd7fd0ff43d0420eb583ad575393d7a7a3",
   "tests/test_public_search_agent.py": "9ede34abd9f1e6775ae7575dadd31d410ad98b80016fc52f6164f2e89d4608ac",
+  "tests/test_recall_finalization.py": "1c245dbd6381918e65c9818bf6729bcd0cd732a466f756ccf8ce54b4372883c8",
   "tests/test_search_ranking.py": "8875500d2ce038c7aea419176f2ed1a781604977f55bffad63ff0be5ef9c5265",
   "tests/test_stock.py": "19b9f350966a0e8cb2e7d7155f6dacd8a71852e9475609ad783b3d18b51a4af2"
 }
