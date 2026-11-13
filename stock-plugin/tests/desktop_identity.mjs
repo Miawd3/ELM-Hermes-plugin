@@ -39,3 +39,7 @@ assert.ok(shipped.includes("visibleState.permissions_via_cli && (key !== 'enable
 assert.ok(shipped.includes('disabled: busy || visibleState.permissions_via_cli'))
 assert.ok(shipped.includes('Any authenticated client of this chat shares access.'))
 console.log('PASS: 3 exact-session grant UI restriction checks.')
+
+assert.ok(shipped.includes("if (command === 'off')"))
+assert.ok(shipped.includes('Memory is off for this chat. Saved data is kept.'))
+console.log('PASS: 2 settings revocation confirmation checks.')

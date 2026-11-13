@@ -69,6 +69,9 @@ function Settings() {
         if (typeof output !== 'string' || output.includes('"error":')) throw new Error('Change failed. Check /elm status in this chat.')
       }
       if (!current() || token !== generation.current) return
+      if (command === 'off') {
+        setState(null); setError('Memory is off for this chat. Saved data is kept. Use the local grant command to renew unified-session access.'); return
+      }
       const reply = await gateway.request('slash.exec', { session_id: sid, profile, command: 'elm status' })
       if (!current() || token !== generation.current) return
       const next = parseStatus(reply)

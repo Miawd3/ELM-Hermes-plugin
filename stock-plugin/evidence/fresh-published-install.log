@@ -1,0 +1,20 @@
+⚠ install out of sync (ffmpeg: not installed or outdated; node: not installed or outdated; npm: not installed or outdated; pnpm: not installed or outdated; ripgrep: not installed or outdated) — this unknown-managed install must rebuild the artifact to fix
+Warning: custom (unreviewed) source — not from the Hermes catalog.
+Cloning https://github.com/Miawd3/ELM-Hermes-plugin.git (subdir: 
+stock-plugin)...
+Preparing the isolated Hermes runtime…
+  → Installing Python dependencies…
+  ✓ Installing Python dependencies
+
+╭──────────────────────────────── ✓ Installed ─────────────────────────────────╮
+│ Plugin installed:                                                            │
+│ https://github.com/Miawd3/ELM-Hermes-plugin.git#stock-plugin                 │
+│ Location:                                                                    │
+│ <workspace>/elm_stock_desktop_qa/fresh-published-profile │
+│ /plugins/elm                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+  → Installing Python dependencies…
+  ✓ Installing Python dependencies
+✓ Plugin elm enabled.
+

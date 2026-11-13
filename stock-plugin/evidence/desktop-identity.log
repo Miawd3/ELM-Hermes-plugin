@@ -1,3 +1,4 @@
 PASS: 19 desktop owner/status guards, including connection/socket swaps, ABA epoch, focused-owner mismatch, reconnect, malformed response and stale publication.
 PASS: 6 shipped UI contract checks: inline helper parity, loader-supported imports, reactive epoch, owner-bound rendering and publication.
 PASS: 3 exact-session grant UI restriction checks.
+PASS: 2 settings revocation confirmation checks.

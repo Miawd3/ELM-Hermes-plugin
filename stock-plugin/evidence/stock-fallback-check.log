@@ -1,0 +1,1 @@
+PASS: published Runtime + real stock plugin_db, explicitly injected unavailable completion; deterministic original-query local fallback, one bounded planner attempt, one scoped fact. No actual provider request.
