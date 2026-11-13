@@ -60,6 +60,25 @@ Plugin-owned profile-local SQLite storage; separate `user`, `project`, `referenc
 
 The planner sends **only the search query**, never the memory database, and returns up to two alternative queries. Scope and local search stay deterministic. Original query is always searched. Failure falls back to local search. At most one plugin completion per explicit agent search, with 192 output tokens and 15-second timeout. Hermes/provider routing may have its own retries and fees. These limits are **not a dollar spending cap**. Automatic per-turn recall never calls the planner.
 
+## Draft a skill from selected long-term notes
+
+1. `/elm list` to find approved record IDs in this chat's permitted scopes.
+2. `/elm draft-skill "Release checks" <record-id> [more IDs]` selects one to four records.
+3. `/elm pending` to read the draft; `/elm skill-sources <draft-id>` shows saved source excerpts.
+4. Edit and review it. `/elm approve <draft-id>` approves a **memory record only**, not installation or execution.
+
+This deterministic, no-model operation creates a **pending worksheet** with a trigger/procedure/verification scaffold and exact source excerpts, not a polished autonomous skill. It never registers a new runnable skill, writes a skill file, calls a provider or silently turns facts into authoritative instructions. Each excerpt is bounded to 1,200 UTF-8 bytes; truncation is reported. You must finish and test the procedure before manually installing it through your chosen skill manager.
+
+The worksheet and provenance snapshots are saved in the originating chat, including explicitly selected shared-scope excerpts. They are copies, so later edits or withdrawal of the source scope do not erase the draft. Turning ELM off prevents access but keeps its stored data. Do not draft from notes you do not want copied into that chat.
+
+## Official Memory Wiki coexistence
+
+The official `hermes-memory-wiki` catalog plugin (installed ID `memory-wiki`) is separate. Its pinned public contract is read-only: it indexes Hermes session history and `MEMORY.md` / `USER.md`; it does **not** read ELM's database or provide a supported import/sync API. ELM does not create a competing wiki, silently copy records to global prompt notes, or claim synchronization.
+
+If desired, install the official plugin separately with `hermes plugins install hermes-memory-wiki --enable`, then enable Memory Wiki in Desktop Capabilities. Its route is `/memory-wiki`. [Official contract inspected](https://github.com/NousResearch/hermes-official-plugins/blob/e7a218f26db88426ab3e7376f0e000b6e356f5e7/memory-wiki/README.md).
+
+**Important:** ELM facts printed or recalled into ordinary chat can appear in Memory Wiki's history views. ELM's scope grants do not restrict an independently installed plugin reading Hermes history. This is transcript indexing, not ELM database sync.
+
 ## Optional inline presentation
 
 **Settings → Plugins → ELM → Inline answer cards** enables app-wide visual cards (off by default). Choose Accent or Plain; the page includes a clearly labelled display example. The `rich-answers` skill documents `::elm-answer{kind="question" title="One choice" text="Which option?"}` with fixed Progress, Update, Answer, Final and Question labels. These are **model-provided labels**, not proof that work completed. Text is bounded and escaped; cards cannot run commands, grant permissions or add model-controlled buttons.
@@ -82,7 +101,7 @@ No existing patched-store files are read, deleted or automatically migrated. New
 
 - Native chat folders, important-message timeline markers and whole-message bubble labels/styles depended on host patches. They are **not** advertised as stock plugin features.
 - Own wiki: removed. The official Hermes Memory Wiki remains independently installed; there is no automatic ELM-record sync.
-- Autonomous/background organization, skill creation from long-term data, embeddings and benchmark improvements: not implemented here. Organization is an explicit user action on a selected source; review is required.
+- Autonomous/background organization, automatic runnable-skill generation/installation, embeddings and benchmark improvements: not implemented here. Selected-memory skill worksheets are explicit drafts, described above. Organization is an explicit user action on a selected source; review is required.
 - Self-updater: not included. Updates use Hermes's normal plugin manager; no startup core modification.
 - ELM does not build a second model picker. It registers two official auxiliary slots, configured through Hermes’s existing model settings. Host-owned routing, credentials and trust checks remain in force.
 
@@ -92,7 +111,7 @@ Pinned unmodified Hermes source `126980e47b826963b26bf57d210106d849322f8a`:
 
 - Official `hermes plugins validate`: all checks passed; no private-import/core-override warning.
 - Official Plugin Doctor: runtime discovery, import and registration passed (1 tool, 2 hooks).
-- 50 standard-library tests passed, including model scope spoofing, no-default egress, approval, source bounds, gateway refusal and cross-profile storage-factory switching.
+- 55 standard-library tests passed, including model scope spoofing, no-default egress, approval, source bounds, gateway refusal and cross-profile storage-factory switching.
 - Manually constructed stock command-dispatch/tool-registry/hook integration passed with network blocked; both auxiliary task slots registered.
 - Real public `plugin_db` smoke test passed with two disposable profile homes and reopening persisted data.
 

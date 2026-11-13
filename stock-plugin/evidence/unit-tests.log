@@ -28,6 +28,7 @@ test_cli_scope_change_invalidates_existing_grant (test_stock.StockTests.test_cli
 test_default_cross_chat_isolation (test_stock.StockTests.test_default_cross_chat_isolation) ... ok
 test_disabled_no_tool_access_or_egress (test_stock.StockTests.test_disabled_no_tool_access_or_egress) ... ok
 test_edit_keeps_original_status (test_stock.StockTests.test_edit_keeps_original_status) ... ok
+test_expired_grant_cannot_draft_skill (test_stock.StockTests.test_expired_grant_cannot_draft_skill) ... ok
 test_expired_grant_prevents_desktop_agent_egress (test_stock.StockTests.test_expired_grant_prevents_desktop_agent_egress) ... ok
 test_expiry_after_retrieval_does_not_return_records (test_stock.StockTests.test_expiry_after_retrieval_does_not_return_records) ... ok
 test_gateway_cannot_use_local_grant (test_stock.StockTests.test_gateway_cannot_use_local_grant) ... ok
@@ -43,6 +44,10 @@ test_project_is_explicit_in_each_chat (test_stock.StockTests.test_project_is_exp
 test_proposals_need_review (test_stock.StockTests.test_proposals_need_review) ... ok
 test_registration_only_public_ctx (test_stock.StockTests.test_registration_only_public_ctx) ... ok
 test_revoke_disables_tools_and_hooks (test_stock.StockTests.test_revoke_disables_tools_and_hooks) ... ok
+test_skill_draft_atomic_on_mixed_invalid_sources (test_stock.StockTests.test_skill_draft_atomic_on_mixed_invalid_sources) ... ok
+test_skill_draft_is_pending_bounded_and_not_installed (test_stock.StockTests.test_skill_draft_is_pending_bounded_and_not_installed) ... ok
+test_skill_draft_refuses_unapproved_or_other_chat (test_stock.StockTests.test_skill_draft_refuses_unapproved_or_other_chat) ... ok
+test_skill_draft_snapshots_and_bounds_unicode (test_stock.StockTests.test_skill_draft_snapshots_and_bounds_unicode) ... ok
 test_source_scope_validation (test_stock.StockTests.test_source_scope_validation) ... ok
 test_stock_gui_command_uses_same_local_namespace (test_stock.StockTests.test_stock_gui_command_uses_same_local_namespace) ... ok
 test_storage_factory_rechecks_profile (test_stock.StockTests.test_storage_factory_rechecks_profile) ... ok
@@ -50,6 +55,6 @@ test_trash_restore_review (test_stock.StockTests.test_trash_restore_review) ... 
 test_user_scope_is_separate_opt_in (test_stock.StockTests.test_user_scope_is_separate_opt_in) ... ok
 
 ----------------------------------------------------------------------
-Ran 50 tests in 0.150s
+Ran 55 tests in 0.152s
 
 OK

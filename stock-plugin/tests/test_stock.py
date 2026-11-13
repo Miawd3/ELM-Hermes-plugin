@@ -96,6 +96,53 @@ class StockTests(unittest.TestCase):
         result=self.tool({'action':'search','query':'door'})
         self.assertIn('error',result);self.assertNotIn('results',result)
 
+    def test_skill_draft_is_pending_bounded_and_not_installed(self):
+        self.enable()
+        source=json.loads(self.cmd('save reference Check tests before publishing.'))
+        draft=json.loads(self.cmd('draft-skill "Release checklist" '+source['id']))
+        self.assertEqual(draft['status'],'pending');self.assertFalse(draft['installed'])
+        self.assertEqual(len(self.store.records(self.a,'',status='pending')),1)
+        self.assertEqual(self.ctx.calls,[])
+        proof=json.loads(self.cmd('skill-sources '+draft['id']))
+        self.assertEqual(proof[0]['excerpt'],'Check tests before publishing.')
+        self.cmd('approve '+draft['id'])
+        self.assertEqual(self.store.records(self.a,'Release')[0]['kind'],'skill')
+        self.assertEqual(self.ctx.registrations,[])
+
+    def test_skill_draft_refuses_unapproved_or_other_chat(self):
+        self.enable('a','b')
+        source=json.loads(self.cmd('save reference Private source'))
+        self.assertIn('error',self.cmd('draft-skill "Other" '+source['id'],'b'))
+        pending=self.tool({'action':'propose','kind':'reference','text':'pending source'})
+        self.assertIn('error',self.cmd('draft-skill "Pending" '+pending['id']))
+        self.assertEqual(self.store.records(self.a,'',status='pending')[0]['id'],pending['id'])
+
+    def test_skill_draft_snapshots_and_bounds_unicode(self):
+        self.enable()
+        source=json.loads(self.cmd('save reference '+('界'*2000)))
+        draft=self.store.draft_skill(self.a,'Unicode',[source['id']])
+        self.assertTrue(draft['truncated'])
+        self.cmd('edit '+source['id']+' changed')
+        proof=self.store.skill_sources(self.a,draft['id'])
+        self.assertEqual(proof[0]['excerpt'],'界'*400)
+        self.assertLessEqual(len(self.store.records(self.a,'',status='pending')[0]['text'].encode()),8000)
+        self.enable('b')
+        with self.assertRaises(Denied):self.store.skill_sources(self.b,draft['id'])
+
+    def test_skill_draft_atomic_on_mixed_invalid_sources(self):
+        self.enable()
+        source=json.loads(self.cmd('save reference Valid'))
+        for ids in ([source['id'], '0'*32],[source['id']]*2,[],['x']):
+            with self.assertRaises(ValueError):self.store.draft_skill(self.a,'Draft',ids)
+        self.assertEqual(self.store.records(self.a,'',status='pending'),[])
+        with self.store.open() as db:self.assertEqual(db.execute('SELECT count(*) FROM stock_skill_sources').fetchone()[0],0)
+
+    def test_expired_grant_cannot_draft_skill(self):
+        self.store.grant_local('a')
+        source=json.loads(self.cmd('save reference Source'))
+        with self.store.open() as db:db.execute('UPDATE stock_local_grants SET expires=0')
+        with self.assertRaises(Denied):self.store.draft_skill(self.a,'Draft',[source['id']])
+
     def test_stock_gui_command_uses_same_local_namespace(self):
         self.assertIn('enabled for this chat', self.cmd('on', platform='gui'))
         self.cmd('save reference GUI-scoped fact', platform='gui')

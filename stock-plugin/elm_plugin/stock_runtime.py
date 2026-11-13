@@ -11,6 +11,7 @@ HELP = ('ELM: /elm on | off | status | pending [offset] | list [offset] | source
         '/elm organize <source-id> (sends that source to the organizer model)\n'
         '/elm save <user|project|reference|skill> <text>\n'
         '/elm approve|trash|restore <id> · /elm edit <id> <text>\n'
+        '/elm draft-skill \"Title\" <record-id> [up to four IDs] · /elm skill-sources <id>\n'
         '/elm search <query> · /elm agent-search <query> · /elm source <id> [offset]\n'
         'Local chats only. New chats/branches need their own permission.\n'
         'Approved recall is added to your conversation and may be sent to its model provider.\n'
@@ -82,6 +83,10 @@ class Runtime:
                 offset=int(args[0]) if args else 0
                 rows=self.store.records(sid,status={'list':'approved','pending':'pending','trash':'trash'}[verb],offset=offset)
                 return encode({'records':rows,'offset':offset,'next_offset':offset+12 if len(rows)==12 else None})
+            if verb=='draft-skill' and 2 <= len(args) <= 5:
+                return encode(self.store.draft_skill(sid,args[0],args[1:]))
+            if verb=='skill-sources' and len(args)==1:
+                return encode(self.store.skill_sources(sid,args[0]))
             if verb=='organize' and len(args)==1:
                 state=self.store.authorized_settings(sid)
                 if not state['enabled'] or not state['organizer']: raise Denied('enable_elm_and_organizer_first')
