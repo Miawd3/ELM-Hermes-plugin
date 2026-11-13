@@ -50,6 +50,6 @@ test_trash_restore_review (test_stock.StockTests.test_trash_restore_review) ... 
 test_user_scope_is_separate_opt_in (test_stock.StockTests.test_user_scope_is_separate_opt_in) ... ok
 
 ----------------------------------------------------------------------
-Ran 50 tests in 0.193s
+Ran 50 tests in 0.150s
 
 OK

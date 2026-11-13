@@ -190,6 +190,6 @@ class StockTests(unittest.TestCase):
         register_stock(self.ctx)
         names=[r[0] for r in self.ctx.registrations]
         self.assertEqual(set(names),{'register_tool','register_hook','register_command','register_skill','register_auxiliary_task'})
-        self.assertEqual(names.count('register_skill'),6)
+        self.assertEqual(names.count('register_skill'),7)
 
 if __name__=='__main__':unittest.main()

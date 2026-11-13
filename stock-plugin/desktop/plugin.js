@@ -1,5 +1,26 @@
-import { host, useValue, ToggleRow, gatewayActivationEpoch, useGatewayActivationEpoch } from '@hermes/plugin-sdk'
+import { host, useValue, ToggleRow, gatewayActivationEpoch, useGatewayActivationEpoch, TRANSCRIPT_DIRECTIVE_AREA, SESSION_ROW_AREAS, pluginSettingsHref } from '@hermes/plugin-sdk'
 import { createElement as h, useEffect, useRef, useState } from 'react'
+
+// BEGIN INLINED RICH HELPERS
+// Untrusted presentation data only. No authority, HTML, URL or executable content.
+function richData(attrs) {
+  if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs)) return null
+  if (Object.keys(attrs).some(k => !['kind','title','text'].includes(k))) return null
+  const labels = {progress:'Progress', update:'Update', answer:'Answer', final:'Final', question:'Question'}
+  if (!Object.hasOwn(labels, attrs.kind)) return null
+  if (typeof attrs.text !== 'string' || !attrs.text.trim() || attrs.text.length > 1200) return null
+  if (attrs.title !== undefined && (typeof attrs.title !== 'string' || attrs.title.length > 100)) return null
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test((attrs.title || '') + attrs.text)) return null
+  return {label: labels[attrs.kind], title: attrs.title || '', text: attrs.text}
+}
+function visualPrefs(value) {
+  return {rich:value?.rich === true, shortcut:value?.shortcut !== false, style:value?.style === 'plain' ? 'plain' : 'accent'}
+}
+function ownedRow(row, focused, owner, connection, profile) {
+  return typeof row === 'string' && !!row && row === focused && !!connection &&
+    !!owner && owner.connectionId === connection && owner.profile === profile
+}
+// END INLINED RICH HELPERS
 
 // BEGIN INLINED IDENTITY HELPERS
 // Pure owner fence. Profile names and session IDs alone are not an identity.
@@ -96,6 +117,7 @@ function Settings() {
 
   return h('section', { style: { display: 'grid', gap: 16, maxWidth: 720, padding: 16 } },
     h('h2', { style: { fontSize: 18, fontWeight: 600 } }, 'ELM · focused chat'),
+    h(VisualSettings),
     h('p', null, valid ? 'Settings apply to the focused local chat, not every chat.' : 'Focus a saved local chat on the active connection to configure ELM.'),
     error && h('p', { role: 'alert' }, error),
     visibleState?.permissions_via_cli && h('p', { style: { fontSize: 12, opacity: .75 } }, 'Permissions are set with the local grant command for this exact chat. Any authenticated client of this chat shares access. You can turn memory off here.'),
@@ -115,9 +137,55 @@ function Settings() {
   )
 }
 
+let visualStorage = null
+const visualListeners = new Set()
+function readVisual() { try { return visualPrefs(visualStorage?.get('visual-v1', {})) } catch { return visualPrefs({}) } }
+function useVisual() {
+  const [prefs, setPrefs] = useState(readVisual)
+  useEffect(() => { const changed = () => setPrefs(readVisual()); visualListeners.add(changed); return () => visualListeners.delete(changed) }, [])
+  function change(patch) {
+    const next = visualPrefs({...readVisual(), ...patch})
+    try { visualStorage?.set('visual-v1', next); for (const notify of visualListeners) notify() } catch { /* Keep previous UI if saving fails. */ }
+  }
+  return [prefs, change]
+}
+function VisualSettings() {
+  const [prefs, change] = useVisual()
+  return h('div', {style:{display:'grid',gap:10}},
+    h(ToggleRow,{label:'Inline answer cards',description:'App-wide display preference. Model labels are not proof of completion.',checked:prefs.rich,onChange:rich=>change({rich})}),
+    prefs.rich && h('div',null,h('small',null,'Display example, not a conversation result'),h(RichAnswer,{attrs:{kind:'question',title:'Choose a direction',text:'Which approach should we explore?'},source:'',streaming:false})),
+    h('label',null,'Card style ',h('select',{value:prefs.style,onChange:e=>change({style:e.target.value})},h('option',{value:'accent'},'Accent'),h('option',{value:'plain'},'Plain'))),
+    h(ToggleRow,{label:'Chat settings shortcut',description:'ELM shortcut on the focused chat. Not a memory-status indicator.',checked:prefs.shortcut,onChange:shortcut=>change({shortcut})}))
+}
+function RichAnswer({attrs,source,streaming}) {
+  const [prefs] = useVisual()
+  const data = richData(attrs)
+  if (!prefs.rich || !data) return h('span',null,typeof source === 'string' ? source : '')
+  return h('span',{style:{display:'block',border:'1px solid currentColor',borderLeft:prefs.style==='accent'?'3px solid currentColor':'1px solid currentColor',borderRadius:6,padding:12,margin:'8px 0'},'aria-label':'Model-provided '+data.label},
+    h('strong',null,data.label), streaming && h('span',null,' · still streaming'),
+    h('span',{style:{display:'block',fontSize:11,opacity:.65}},'Model-provided label'),
+    data.title && h('strong',{style:{display:'block',marginTop:6}},data.title),
+    h('span',{style:{display:'block',whiteSpace:'pre-wrap',overflowWrap:'anywhere'}},data.text))
+}
+function ElmRowShortcut({sessionId}) {
+  const [prefs] = useVisual()
+  const focused=useValue(host.state.focusedStoredSessionId)
+  const owner=useValue(host.state.focusedSessionOwner)
+  const connection=useValue(host.state.connectionId)
+  const profile=useValue(host.state.profile)
+  if (!prefs.shortcut || !ownedRow(sessionId,focused,owner,connection,profile)) return null
+  return h('button',{title:'Open ELM settings for focused chat; not memory status',style:{fontSize:10,padding:'1px 4px'},onClick:e=>{
+    e.stopPropagation()
+    if (ownedRow(sessionId,host.state.focusedStoredSessionId.get(),host.state.focusedSessionOwner.get(),host.state.connectionId.get(),host.state.profile.get())) host.navigate(pluginSettingsHref('elm:settings'))
+  }},'ELM')
+}
+
 export default {
   id: 'elm', name: 'ELM',
   register(ctx) {
+    visualStorage = ctx.storage
+    ctx.register({id:'rich-answer',area:TRANSCRIPT_DIRECTIVE_AREA,data:{name:'elm-answer',render:props=>h(RichAnswer,props)}})
+    ctx.register({id:'session-settings',area:SESSION_ROW_AREAS.trailing,data:{render:props=>h(ElmRowShortcut,props)}})
     ctx.registerSettingsPage({ id: 'settings', title: 'ELM', icon: 'database', render: () => h(Settings) })
   }
 }

@@ -56,9 +56,17 @@ Scope-setting slash commands below apply to classic CLI/TUI. For unified Desktop
 
 ## What is implemented
 
-Plugin-owned profile-local SQLite storage; separate `user`, `project`, `reference` and `skill` record kinds and tags; pending/approved/trash states; manual review, edit and restore; source-linked proposals; explicit per-chat project/user scope sharing; opt-in turn capture; local keyword recall; a bounded dedicated search query planner and source organizer through official `ctx.llm`; native model-assignment slots; concise desktop settings; six original progressively loaded skills.
+Plugin-owned profile-local SQLite storage; separate `user`, `project`, `reference` and `skill` record kinds and tags; pending/approved/trash states; manual review, edit and restore; source-linked proposals; explicit per-chat project/user scope sharing; opt-in turn capture; local keyword recall; a bounded dedicated search query planner and source organizer through official `ctx.llm`; native model-assignment slots; concise desktop settings; seven original progressively loaded skills.
 
 The planner sends **only the search query**, never the memory database, and returns up to two alternative queries. Scope and local search stay deterministic. Original query is always searched. Failure falls back to local search. At most one plugin completion per explicit agent search, with 192 output tokens and 15-second timeout. Hermes/provider routing may have its own retries and fees. These limits are **not a dollar spending cap**. Automatic per-turn recall never calls the planner.
+
+## Optional inline presentation
+
+**Settings → Plugins → ELM → Inline answer cards** enables app-wide visual cards (off by default). Choose Accent or Plain; the page includes a clearly labelled display example. The `rich-answers` skill documents `::elm-answer{kind="question" title="One choice" text="Which option?"}` with fixed Progress, Update, Answer, Final and Question labels. These are **model-provided labels**, not proof that work completed. Text is bounded and escaped; cards cannot run commands, grant permissions or add model-controlled buttons.
+
+The focused chat can show a small **ELM settings shortcut**, separately toggleable. It opens this plugin's settings only; it is **not a memory-active badge**. These are supported inline transcript and session-row additions, not native whole-message bubbles, folders or importance markers. Visual preferences do not enable memory or model calls.
+
+Actual stock Desktop checks confirmed the row shortcut navigates to ELM settings, its toggle hides it, and enabling cards shows the labelled preview; style selection worked. Real model-generated transcript cards have not been tested with a live provider.
 
 ## Privacy and limitations
 

@@ -163,6 +163,6 @@ def register_stock(ctx):
     ctx.register_hook('pre_llm_call',runtime.before_turn)
     ctx.register_hook('post_llm_call',runtime.after_turn)
     root=Path(__file__).parent.parent/'starter_skills'
-    for name in ('source-research','documentation-lookup','debugging-recovery','verification','delegation','creative-continuity'):
+    for name in ('source-research','documentation-lookup','debugging-recovery','verification','delegation','creative-continuity','rich-answers'):
         ctx.register_skill(name,root/name/'SKILL.md')
     return runtime
