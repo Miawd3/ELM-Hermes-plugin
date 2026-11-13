@@ -35,3 +35,7 @@ assert.ok(shipped.includes('const visibleState = sameIdentity(stateOwner, identi
 assert.ok(shipped.includes("visibleState && h('div'"))
 assert.ok(shipped.includes('setStateOwner(identity); setState(next)'))
 console.log('PASS: 6 shipped UI contract checks: inline helper parity, loader-supported imports, reactive epoch, owner-bound rendering and publication.')
+assert.ok(shipped.includes("visibleState.permissions_via_cli && (key !== 'enabled' || !visibleState.enabled)"))
+assert.ok(shipped.includes('disabled: busy || visibleState.permissions_via_cli'))
+assert.ok(shipped.includes('Any authenticated client of this chat shares access.'))
+console.log('PASS: 3 exact-session grant UI restriction checks.')

@@ -42,6 +42,8 @@ class Store:
     def open(self):
         db = self.connection()
         db.executescript('''
+        CREATE TABLE IF NOT EXISTS stock_local_grants (
+          session TEXT PRIMARY KEY, expires REAL NOT NULL, revision INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS stock_sessions (
           session TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0,
           project TEXT, user_scope INTEGER NOT NULL DEFAULT 0,
@@ -73,6 +75,9 @@ class Store:
     def state(db, sid, require=True):
         row = db.execute('SELECT enabled,project,user_scope,capture,agent,organizer,revision FROM stock_sessions WHERE session=?', (sid,)).fetchone()
         state = dict(zip(('enabled','project','user_scope','capture','agent','organizer','revision'), row or (0,None,0,0,0,0,0)))
+        grant = db.execute('SELECT expires,revision FROM stock_local_grants WHERE session=?',(sid,)).fetchone()
+        if require and grant and (grant[0] <= time.time() or grant[1] != state['revision']):
+            raise Denied('local_grant_expired_or_changed')
         if require and not state['enabled']:
             raise Denied('enable_this_chat_with_slash_elm_on')
         return state
@@ -83,6 +88,10 @@ class Store:
         if state['project']: scopes.append('project:' + state['project'])
         if state['user_scope']: scopes.append('user:local-profile')
         return scopes
+
+    def authorized_settings(self, sid):
+        with closing(self.open()) as db:
+            return self.state(db,sid)
 
     def settings(self, sid, changes=None):
         with closing(self.open()) as db, db:
@@ -98,6 +107,31 @@ class Store:
                     db.execute('UPDATE stock_sessions SET ' + key + '=? WHERE session=?', (value,sid))
                 db.execute('UPDATE stock_sessions SET revision=revision+1 WHERE session=?',(sid,))
             return self.state(db, sid, False)
+
+    def grant_local(self, session_id, *, hours=24, project=None, user=False, capture=False, agent=False, organizer=False):
+        """Out-of-band CLI only. Never registered as a tool or slash command."""
+        sid=session_key(session_id,'cli')
+        if type(hours) is not int or not 1 <= hours <= 168: raise ValueError('invalid_hours')
+        if project is not None: project=text(project,120)
+        if any(type(v) is not bool for v in (user,capture,agent,organizer)): raise ValueError('invalid_setting')
+        with closing(self.open()) as db, db:
+            db.execute('BEGIN IMMEDIATE')
+            db.execute('INSERT OR IGNORE INTO stock_sessions(session) VALUES(?)',(sid,))
+            db.execute('UPDATE stock_sessions SET enabled=1,project=?,user_scope=?,capture=?,agent=?,organizer=?,revision=revision+1 WHERE session=?',
+                       (project,user,capture,agent,organizer,sid))
+            revision=self.state(db,sid,False)['revision']
+            expires=time.time()+hours*3600
+            db.execute('INSERT OR REPLACE INTO stock_local_grants VALUES(?,?,?)',(sid,expires,revision))
+            return {'expires':expires,'settings':self.state(db,sid,False)}
+
+    def require_local_grant(self, session_id):
+        sid=session_key(session_id,'cli')
+        with closing(self.open()) as db:
+            db.execute('BEGIN')
+            if not db.execute('SELECT 1 FROM stock_local_grants WHERE session=?',(sid,)).fetchone():
+                raise Denied('exact_session_cli_grant_required')
+            self.state(db,sid)
+        return sid
 
     def insert(self, sid, kind, content, tags=(), source_id=None, approved=False):
         if kind not in KINDS: raise ValueError('invalid_kind')

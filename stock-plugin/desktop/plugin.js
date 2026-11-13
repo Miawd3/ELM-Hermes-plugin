@@ -87,7 +87,7 @@ function Settings() {
   }, [sid, profile, connectionId, gatewayState, gateway, owner?.connectionId, owner?.profile, epoch])
 
   const toggle = (key, label, description, command) => h(ToggleRow, {
-    key, label, description, checked: !!visibleState?.[key], disabled: busy || !visibleState,
+    key, label, description, checked: !!visibleState?.[key], disabled: busy || !visibleState || (visibleState.permissions_via_cli && (key !== 'enabled' || !visibleState.enabled)),
     onChange: on => { if (!busy && visibleState) run(`${command ? command + ' ' : ''}${on ? 'on' : 'off'}`) }
   })
 
@@ -95,13 +95,14 @@ function Settings() {
     h('h2', { style: { fontSize: 18, fontWeight: 600 } }, 'ELM · focused chat'),
     h('p', null, valid ? 'Settings apply to the focused local chat, not every chat.' : 'Focus a saved local chat on the active connection to configure ELM.'),
     error && h('p', { role: 'alert' }, error),
+    visibleState?.permissions_via_cli && h('p', { style: { fontSize: 12, opacity: .75 } }, 'Permissions are set with the local grant command for this exact chat. Any authenticated client of this chat shares access. You can turn memory off here.'),
     valid && h('button', { style: buttonStyle, disabled: busy, onClick: () => run() }, busy ? 'Loading…' : 'Refresh'),
     visibleState && h('div', { style: { display: 'grid', gap: 12 } },
       toggle('enabled', 'Memory', 'Approved recall joins your conversation and may reach its model provider.', ''),
       toggle('user_scope', 'Shared user facts', 'Use user facts from other local chats you explicitly enrolled.', 'user'),
-      h('label', null, 'Project', h('input', { style: inputStyle, value: project, maxLength: 120, disabled: busy,
+      h('label', null, 'Project', h('input', { style: inputStyle, value: project, maxLength: 120, disabled: busy || visibleState.permissions_via_cli,
         placeholder: 'No shared project', onChange: e => setProject(e.target.value) })),
-      h('button', { style: buttonStyle, disabled: busy, onClick: () => run(`project ${project.trim() ? JSON.stringify(project.trim()) : 'off'}`) }, 'Apply project'),
+      h('button', { style: buttonStyle, disabled: busy || visibleState.permissions_via_cli, onClick: () => run(`project ${project.trim() ? JSON.stringify(project.trim()) : 'off'}`) }, 'Apply project'),
       toggle('capture', 'Save conversation sources', 'Store completed turns locally as plain text. Avoid secrets.', 'capture'),
       toggle('agent', 'Search agent', 'Explicit agent searches send the query to your selected model. Fees may apply.', 'agent'),
       toggle('organizer', 'Organizer', 'Explicit /elm organize sends the selected source for draft extraction. Review required; fees may apply.', 'organizer'),

@@ -15,11 +15,31 @@ hermes plugins install "https://github.com/Miawd3/ELM-Hermes-plugin.git#stock-pl
 hermes plugins enable elm
 ```
 
-Restart Hermes. In Desktop, open **Capabilities → Plugins**, find **ELM**, and switch it **On**. This Desktop toggle can remain off even after CLI activation. Open a saved local chat and type `/elm on`. Settings: **Settings → Plugins → ELM**; model choices: **Settings → Models → Auxiliary**. Do not install the old `elm/` directory for this route.
+Restart Hermes. In Desktop, open **Capabilities → Plugins**, find **ELM**, and switch it **On**. This Desktop toggle can remain off even after CLI activation. In classic CLI/TUI, type `/elm on`. Current unified Desktop sessions need the explicit one-chat grant below. Settings: **Settings → Plugins → ELM**; model choices: **Settings → Models → Auxiliary**. Do not install the old `elm/` directory for this route.
 
 **Do not apply a host patch.** This candidate uses stock plugin APIs, qualified against Hermes commit `126980e47b826963b26bf57d210106d849322f8a`. This is not full Desktop/Windows or live-provider acceptance. Back up your existing profile first; do not overwrite an older ELM installation. It uses a new database and does not migrate legacy data.
 
+## Desktop: grant one chat locally
+
+Stock unified Desktop commands currently report only `local`, not a trustworthy Desktop-versus-ACP identity. ELM therefore refuses access until you explicitly grant **one exact session** from a local terminal. This is not one-click activation.
+
+1. In Desktop, send `/elm status` to create/save the chat. An access error is expected before the grant.
+2. In a terminal using the **same Hermes profile**, run `hermes sessions list` and copy that chat's full session ID, not its title.
+3. Change directory to that profile's `plugins/elm` folder. Using the Python environment that runs Hermes:
+
+```sh
+python -m elm_plugin.local_grant "EXACT_SESSION_ID" --allow-session-clients
+```
+
+Default: this chat only, 24 hours, no shared user/project scope, no capture, no model calls. Any authenticated client that can operate this **same session** shares the permission, including an ACP client; this is not proof of a human. No other session is enrolled. Do not grant sessions you do not trust.
+
+Use `/elm save reference A test fact`, then `/elm search test`. `/elm off` revokes access and keeps data. To renew or change permissions, rerun the local command with the complete desired options: `--project "MyGame"`, `--user`, `--capture`, `--agent`, `--organizer`, `--hours 24` (maximum 168). Omitted options reset to off. Agent/organizer options permit provider calls and fees; capture saves plaintext. `--revoke` disables a session without renewing it. Read `--help` first.
+
+Desktop settings show current permissions and can switch memory off. They cannot enlarge a unified session's grant. New chats and branches need separate explicit grants. This temporary bridge does not modify Hermes or its policy receipts.
+
 ## Quick use
+
+Scope-setting slash commands below apply to classic CLI/TUI. For unified Desktop, use the local grant options above.
 
 - `/elm save user I prefer short answers` saves a fact you explicitly supplied.
 - Ask the model to use `elm_memory` to propose facts or search saved records.
@@ -42,7 +62,7 @@ The planner sends **only the search query**, never the memory database, and retu
 
 ## Privacy and limitations
 
-This is local personal-profile memory, **not a multi-user authorization system**. CLI, TUI and Desktop sessions are supported; gateway chats, ACP, background/script calls without a valid local session are refused. The host provides the session ID; model arguments cannot choose it or grant access. New chats, branches and rotated transcript segments need fresh `/elm on` permission. This deliberately fails closed rather than guessing session ancestry.
+This is local personal-profile memory, **not a multi-user authorization system**. Classic CLI/TUI and trusted legacy Desktop contexts use explicit chat permission. Unified `local` contexts require the out-of-band exact-session grant above; authenticated clients accessing that same session are indistinguishable. Explicit remote/ACP surfaces and missing sessions are refused, but **ACP exclusion is not guaranteed within a granted unified session**. Model arguments cannot choose the session or issue a grant. New chats, branches and rotated transcript segments need fresh permission. Do not treat local filesystem access as a sandbox against other software running as you.
 
 Without explicit sharing, records stay in their originating chat. Turning on a project or user scope grants that enrolled chat access to that scope's approved records and review operations. Use different Hermes profiles for different people. Capture is plain text and is not guaranteed secret redaction; do not enable it for sensitive credentials. Reads sent into your chat are then subject to Hermes's ordinary transcript/provider handling. Hook recall is not an ephemeral request-only channel.
 
@@ -64,14 +84,14 @@ Pinned unmodified Hermes source `126980e47b826963b26bf57d210106d849322f8a`:
 
 - Official `hermes plugins validate`: all checks passed; no private-import/core-override warning.
 - Official Plugin Doctor: runtime discovery, import and registration passed (1 tool, 2 hooks).
-- 43 standard-library tests passed, including model scope spoofing, no-default egress, approval, source bounds, gateway refusal and cross-profile storage-factory switching.
-- Real stock runtime command-dispatch/tool-registry/hook integration passed with network blocked; both auxiliary task slots registered.
+- 50 standard-library tests passed, including model scope spoofing, no-default egress, approval, source bounds, gateway refusal and cross-profile storage-factory switching.
+- Manually constructed stock command-dispatch/tool-registry/hook integration passed with network blocked; both auxiliary task slots registered.
 - Real public `plugin_db` smoke test passed with two disposable profile homes and reopening persisted data.
 
-No live provider request or paid model call was made. Desktop settings JavaScript passes syntax checking and 19 owner/status guards plus 6 shipped UI contract checks (connection/socket swaps, focused-owner mismatch, stale responses). It uses the captured gateway socket and explicit profile/session; it never falls back to a different source. No visual acceptance is claimed. No full Desktop/Windows walkthrough of this newly scoped package has been performed. The older patched candidate's 176/74 tests and screenshots **do not qualify this new package**.
+No live provider request or paid model call was made. Desktop settings JavaScript has identity/socket/profile fencing and shipped contract tests. The older patched candidate's tests and screenshots do not qualify this package.
 
 ## Real Desktop follow-up
 
-The pinned GitHub installation succeeded in a fresh disposable profile; installed files matched the source manifest. In an unmodified stock Desktop build, enabling ELM through Capabilities registered its settings page, and the page correctly refused configuration without a saved local chat.
+The pinned GitHub candidate installed in a fresh disposable profile with matching manifest hashes. Its actual unmodified stock Desktop settings page loaded after Capabilities activation. A missing model name initially prevented host session restoration; setting model metadata only, without credentials or inference, allowed a fresh session.
 
-A no-provider session could not be established in this environment: the host logged `storage_unavailable / invalid policy`, followed by `Gateway ticket bootstrap failed` on unrelated APIs. This does **not** establish that ELM caused those failures. Saved-session controls, search and model-selection behavior remain unverified in the actual Desktop UI. No paid provider calls were made.
+The real unified gateway exposed a command-context limitation that manually constructed dispatch tests missed. After the exact-session local grant implementation was applied to the installed test plugin, real Desktop commands successfully saved and retrieved a synthetic fact with `local_only`, no provider/model; settings loaded; scope expansion was refused; `/elm off` prevented subsequent recall. Screenshots record these actual runs, not a mockup. The host itself was not patched. Final restricted-control UI, automatic model-turn hooks, Windows installation and live search/organizer providers are not yet fully qualified end-to-end. This remains a candidate, not full feature-parity acceptance.

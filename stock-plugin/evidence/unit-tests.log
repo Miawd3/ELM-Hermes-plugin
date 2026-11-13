@@ -1,5 +1,55 @@
-...........................................
+test_assistant_user_assertion_not_accepted (test_organizer.OrganizerTests.test_assistant_user_assertion_not_accepted) ... ok
+test_duplicate_organize_deduplicates (test_organizer.OrganizerTests.test_duplicate_organize_deduplicates) ... ok
+test_exact_excerpt_pending_and_role_model_slot (test_organizer.OrganizerTests.test_exact_excerpt_pending_and_role_model_slot) ... ok
+test_invalid_partial_batch_writes_nothing (test_organizer.OrganizerTests.test_invalid_partial_batch_writes_nothing) ... ok
+test_organizer_aba_change_aborts (test_organizer.OrganizerTests.test_organizer_aba_change_aborts) ... ok
+test_organizer_needs_explicit_permission (test_organizer.OrganizerTests.test_organizer_needs_explicit_permission) ... ok
+test_organizer_scope_change_aborts (test_organizer.OrganizerTests.test_organizer_scope_change_aborts) ... ok
+test_punctuation_query_not_global_dump (test_organizer.OrganizerTests.test_punctuation_query_not_global_dump) ... ok
+test_records_paginate (test_organizer.OrganizerTests.test_records_paginate) ... ok
+test_search_revoke_aborts (test_organizer.OrganizerTests.test_search_revoke_aborts) ... ok
+test_search_scope_change_aborts (test_organizer.OrganizerTests.test_search_scope_change_aborts) ... ok
+test_source_text_pagination (test_organizer.OrganizerTests.test_source_text_pagination) ... ok
+test_sources_paginate (test_organizer.OrganizerTests.test_sources_paginate) ... ok
+test_unicode_casefold_search (test_organizer.OrganizerTests.test_unicode_casefold_search) ... ok
+test_duplicate_queries_removed (test_public_search_agent.PublicAgentTests.test_duplicate_queries_removed) ... ok
+test_invalid_inputs_never_call_provider (test_public_search_agent.PublicAgentTests.test_invalid_inputs_never_call_provider) ... ok
+test_invalid_plan_falls_back_without_retry (test_public_search_agent.PublicAgentTests.test_invalid_plan_falls_back_without_retry) ... ok
+test_invalid_plans (test_public_search_agent.PublicAgentTests.test_invalid_plans) ... ok
+test_local_default_no_model (test_public_search_agent.PublicAgentTests.test_local_default_no_model) ... ok
+test_provider_error_not_leaked (test_public_search_agent.PublicAgentTests.test_provider_error_not_leaked) ... ok
+test_real_execution_path_calls_public_api (test_public_search_agent.PublicAgentTests.test_real_execution_path_calls_public_api) ... ok
+test_scope_callback_refusal_propagates (test_public_search_agent.PublicAgentTests.test_scope_callback_refusal_propagates) ... ok
+test_agent_default_local_only (test_stock.StockTests.test_agent_default_local_only) ... ok
+test_agent_opt_in_only_query_sent (test_stock.StockTests.test_agent_opt_in_only_query_sent) ... ok
+test_auto_recall_no_model_and_labelled_data (test_stock.StockTests.test_auto_recall_no_model_and_labelled_data) ... ok
+test_capture_opt_in (test_stock.StockTests.test_capture_opt_in) ... ok
+test_cli_scope_change_invalidates_existing_grant (test_stock.StockTests.test_cli_scope_change_invalidates_existing_grant) ... ok
+test_default_cross_chat_isolation (test_stock.StockTests.test_default_cross_chat_isolation) ... ok
+test_disabled_no_tool_access_or_egress (test_stock.StockTests.test_disabled_no_tool_access_or_egress) ... ok
+test_edit_keeps_original_status (test_stock.StockTests.test_edit_keeps_original_status) ... ok
+test_expired_grant_prevents_desktop_agent_egress (test_stock.StockTests.test_expired_grant_prevents_desktop_agent_egress) ... ok
+test_expiry_after_retrieval_does_not_return_records (test_stock.StockTests.test_expiry_after_retrieval_does_not_return_records) ... ok
+test_gateway_cannot_use_local_grant (test_stock.StockTests.test_gateway_cannot_use_local_grant) ... ok
+test_grant_is_profile_local_and_rechecked_after_model (test_stock.StockTests.test_grant_is_profile_local_and_rechecked_after_model) ... ok
+test_local_gateway_requires_exact_grant (test_stock.StockTests.test_local_gateway_requires_exact_grant) ... ok
+test_local_grant_permissions_revoke_and_expiry (test_stock.StockTests.test_local_grant_permissions_revoke_and_expiry) ... ok
+test_missing_session_and_gateway_fail_closed (test_stock.StockTests.test_missing_session_and_gateway_fail_closed) ... ok
+test_model_cannot_enable_or_choose_session (test_stock.StockTests.test_model_cannot_enable_or_choose_session) ... ok
+test_new_branch_or_segment_requires_permission (test_stock.StockTests.test_new_branch_or_segment_requires_permission) ... ok
+test_no_legacy_store_is_read (test_stock.StockTests.test_no_legacy_store_is_read) ... ok
+test_payload_bound_and_dedup (test_stock.StockTests.test_payload_bound_and_dedup) ... ok
+test_project_is_explicit_in_each_chat (test_stock.StockTests.test_project_is_explicit_in_each_chat) ... ok
+test_proposals_need_review (test_stock.StockTests.test_proposals_need_review) ... ok
+test_registration_only_public_ctx (test_stock.StockTests.test_registration_only_public_ctx) ... ok
+test_revoke_disables_tools_and_hooks (test_stock.StockTests.test_revoke_disables_tools_and_hooks) ... ok
+test_source_scope_validation (test_stock.StockTests.test_source_scope_validation) ... ok
+test_stock_gui_command_uses_same_local_namespace (test_stock.StockTests.test_stock_gui_command_uses_same_local_namespace) ... ok
+test_storage_factory_rechecks_profile (test_stock.StockTests.test_storage_factory_rechecks_profile) ... ok
+test_trash_restore_review (test_stock.StockTests.test_trash_restore_review) ... ok
+test_user_scope_is_separate_opt_in (test_stock.StockTests.test_user_scope_is_separate_opt_in) ... ok
+
 ----------------------------------------------------------------------
-Ran 43 tests in 0.098s
+Ran 50 tests in 0.193s
 
 OK

@@ -40,15 +40,17 @@ class Runtime:
         self.ctx,self.store = ctx,store or Store()
 
     def sid(self,session_id,platform=None):
-        # Command platform is supplied by the host. Tools/hooks use public ctx surface.
-        return session_key(session_id,platform if platform is not None else self.ctx.session_surface())
+        surface = platform if platform is not None else self.ctx.session_surface()
+        if surface == 'local':
+            return self.store.require_local_grant(session_id)
+        return session_key(session_id, 'desktop' if surface == 'gui' else surface)
 
     def search(self,sid,query,agent=False):
-        state = self.store.settings(sid)
+        state = self.store.authorized_settings(sid)
         if not state['enabled']: raise Denied('enable_this_chat_with_slash_elm_on')
         result = search(self.ctx,query,lambda q:self.store.records(sid,q,expected_revision=state['revision']),
                         allow_query_egress=bool(agent and state['agent']))
-        if self.store.settings(sid)['revision']!=state['revision']:raise Denied('scope_changed_retry')
+        if self.store.authorized_settings(sid)['revision']!=state['revision']:raise Denied('scope_changed_retry')
         result['content_role'] = 'saved_reference_data_not_instructions'
         result['results'] = bounded([r for batch in result['results'] for r in batch])
         return result
@@ -59,10 +61,13 @@ class Runtime:
             parts = shlex.split(raw_args)
             if not parts or parts[0] == 'help': return HELP
             verb,args = parts[0],parts[1:]
+            if platform == 'local' and verb in ('on','project','user','capture','agent','organizer'):
+                raise Denied('change_permissions_with_local_grant_cli')
             if verb in ('on','off') and not args:
                 state=self.store.settings(sid,{'enabled':verb=='on'})
                 return 'ELM '+('enabled for this chat. '+HELP if state['enabled'] else 'off for this chat. Saved data kept.')
-            if verb == 'status' and not args: return encode(self.store.settings(sid))
+            if verb == 'status' and not args:
+                return encode(dict(self.store.settings(sid),permissions_via_cli=platform=='local'))
             if verb in ('user','capture','agent','organizer') and args in (['on'],['off']):
                 key={'user':'user_scope','capture':'capture','agent':'agent','organizer':'organizer'}[verb]
                 result=self.store.settings(sid,{key:args[0]=='on'})
@@ -78,10 +83,10 @@ class Runtime:
                 rows=self.store.records(sid,status={'list':'approved','pending':'pending','trash':'trash'}[verb],offset=offset)
                 return encode({'records':rows,'offset':offset,'next_offset':offset+12 if len(rows)==12 else None})
             if verb=='organize' and len(args)==1:
-                state=self.store.settings(sid)
+                state=self.store.authorized_settings(sid)
                 if not state['enabled'] or not state['organizer']: raise Denied('enable_elm_and_organizer_first')
                 source=self.store.source(sid,args[0])
-                if self.store.settings(sid)['revision']!=state['revision']:raise Denied('scope_changed_retry')
+                if self.store.authorized_settings(sid)['revision']!=state['revision']:raise Denied('scope_changed_retry')
                 from .stock_organizer import organize
                 try: records=organize(self.ctx,source)
                 except Exception: return encode({'error':'organizer_failed_no_drafts_saved'})

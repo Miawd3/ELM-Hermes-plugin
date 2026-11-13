@@ -35,6 +35,74 @@ class StockTests(unittest.TestCase):
     def test_missing_session_and_gateway_fail_closed(self):
         for platform,sid in [('desktop',''),('discord','a'),('','a'),('acp','a')]:
             self.assertIn('local_session_required',self.cmd('on',sid,platform))
+    def test_local_gateway_requires_exact_grant(self):
+        self.assertIn('exact_session_cli_grant_required',self.cmd('on',platform='local'))
+        self.store.grant_local('a')
+        self.assertIn('change_permissions_with_local_grant_cli',self.cmd('on',platform='local'))
+        self.assertNotIn('error',self.cmd('status',platform='local'))
+        self.assertIn('exact_session_cli_grant_required',self.cmd('status','b','local'))
+        self.assertIn('local_session_required',self.cmd('status','a','acp'))
+
+    def test_local_grant_permissions_revoke_and_expiry(self):
+        self.store.grant_local('a')
+        for cmd in ('project other','user on','capture on','agent on','organizer on'):
+            self.assertIn('change_permissions_with_local_grant_cli',self.cmd(cmd,platform='local'))
+        self.ctx.surface='local'
+        self.assertNotIn('error',self.cmd('save reference door blue',platform='local'))
+        self.assertEqual(len(self.tool({'action':'search','query':'door'})['results']),1)
+        self.cmd('off',platform='local')
+        self.assertIn('error',self.tool({'action':'search','query':'door'}))
+        self.store.grant_local('a')
+        with self.store.open() as db:db.execute('UPDATE stock_local_grants SET expires=0')
+        self.assertIn('error',self.tool({'action':'search','query':'door'}))
+        self.assertIsNone(self.runtime.before_turn(session_id='a',user_message='door'))
+
+    def test_cli_scope_change_invalidates_existing_grant(self):
+        self.store.grant_local('a')
+        self.cmd('project different')
+        self.assertIn('local_grant_expired_or_changed',self.cmd('status',platform='local'))
+        self.store.grant_local('a',project='explicit')
+        self.assertEqual(json.loads(self.cmd('status',platform='local'))['project'],'explicit')
+
+    def test_grant_is_profile_local_and_rechecked_after_model(self):
+        other=Store(lambda:sqlite3.connect(Path(self.tmp.name)/'other'))
+        self.store.grant_local('a',agent=True)
+        with self.assertRaises(Denied):other.require_local_grant('a')
+        self.ctx.surface='local'
+        self.cmd('save reference door',platform='local')
+        def expire(**kwargs):
+            with self.store.open() as db:db.execute('UPDATE stock_local_grants SET expires=0')
+            return SimpleNamespace(text='{"queries":["door"]}',model='fake',provider='fake')
+        self.ctx.llm.complete=expire
+        result=self.tool({'action':'search','query':'door','use_agent':True})
+        self.assertIn('error',result)
+        self.assertNotIn('results',result)
+
+    def test_expired_grant_prevents_desktop_agent_egress(self):
+        self.store.grant_local('a',agent=True)
+        with self.store.open() as db:db.execute('UPDATE stock_local_grants SET expires=0')
+        self.assertIn('error',self.tool({'action':'search','query':'door','use_agent':True}))
+        self.assertEqual(self.ctx.calls,[])
+
+    def test_expiry_after_retrieval_does_not_return_records(self):
+        self.store.grant_local('a')
+        self.cmd('save reference door')
+        original=self.store.records
+        def expire_after(*args,**kwargs):
+            records=original(*args,**kwargs)
+            with self.store.open() as db:db.execute('UPDATE stock_local_grants SET expires=0')
+            return records
+        self.store.records=expire_after
+        result=self.tool({'action':'search','query':'door'})
+        self.assertIn('error',result);self.assertNotIn('results',result)
+
+    def test_stock_gui_command_uses_same_local_namespace(self):
+        self.assertIn('enabled for this chat', self.cmd('on', platform='gui'))
+        self.cmd('save reference GUI-scoped fact', platform='gui')
+        self.assertEqual(len(self.tool({'action':'search','query':'GUI-scoped'})['results']), 1)
+        self.assertIn('local_session_required', self.cmd('on', 'a', 'telegram'))
+        self.assertIn('local_session_required', self.cmd('on', '', 'gui'))
+
     def test_disabled_no_tool_access_or_egress(self):
         self.assertIn('error',self.tool({'action':'search','query':'door','use_agent':True}))
         self.assertEqual(self.ctx.calls,[])
