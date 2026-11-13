@@ -64,6 +64,18 @@ Use `/elm save reference A test fact`, then `/elm search test`. `/elm off` revok
 
 Desktop settings show current permissions and can switch memory off. They cannot enlarge a unified session's grant. New chats and branches need separate explicit grants. This temporary bridge does not modify Hermes or its policy receipts.
 
+## Focused-chat memory manager (experimental)
+
+**Windows/Desktop visual verification is still pending. Use a disposable test profile first.**
+
+After an exact-chat grant, open **Settings → Plugins → ELM** with that chat focused. The **Memory in this chat** section lists approved records, drafts needing review, and recoverable Trash. Save a note, approve a draft, move a record to Trash, or restore it to review. No paid model call is needed for these actions.
+
+**Kind is not sharing.** User/project/reference/skill describes the record. The destination beside the save button shows where it will actually go: this chat only, the granted project, or shared user memory in this profile. Without the matching grant, user/project notes stay chat-only. Shared records can be changed by other enrolled chats. This manager does not grant permissions, install skills, search other profiles, or implement native chat folders.
+
+Approval and Trash changes reject records edited since the displayed snapshot. Writes reject changed policy or database identity instead of silently changing destination. Switching chat/profile/connection hides the old manager and discards stale replies. Pages contain at most 12 records; concurrent additions may shift pagination. Refresh when needed. Restore means **pending review**, not automatic approval. Trash does not erase already-delivered model context or copied notes.
+
+This candidate passed backend and Desktop contract tests, including independent race review. Actual installed Windows/React visual behavior still requires testing. The supplied HTML is a synthetic component preview, not a host screenshot.
+
 ## Quick use
 
 Scope-setting slash commands below apply to classic CLI/TUI. For unified Desktop, use the local grant options above.

@@ -177,7 +177,7 @@ class Store:
             self.state(db,sid)
         return sid
 
-    def insert(self, sid, kind, content, tags=(), source_id=None, approved=False):
+    def insert(self, sid, kind, content, tags=(), source_id=None, approved=False, expected_revision=None, expected_store=None):
         if kind not in KINDS: raise ValueError('invalid_kind')
         content = text(content)
         if not isinstance(tags, (list,tuple)) or len(tags) > 12: raise ValueError('invalid_tags')
@@ -185,6 +185,8 @@ class Store:
         with closing(self.open()) as db, db:
             db.execute('BEGIN IMMEDIATE')
             state = self.state(db,sid)
+            if expected_revision is not None and state['revision'] != expected_revision: raise Denied('scope_changed_retry')
+            if expected_store is not None and expected_store != db.execute('SELECT identity FROM stock_read_epoch WHERE singleton=1').fetchone()[0]: raise Denied('memory_changed_retry')
             scope = 'chat:' + sid
             if kind == 'project' and state['project']: scope = 'project:' + state['project']
             if kind == 'user' and state['user_scope']: scope = 'user:local-profile'
@@ -226,14 +228,34 @@ class Store:
             rows = db.execute('SELECT id,kind,content,tags,source_id,scope FROM stock_records WHERE '+where+' ORDER BY '+order+' LIMIT ? OFFSET ?', params+rank_params+[limit,offset]).fetchall()
             return [{'id':r[0],'kind':r[1],'text':r[2],'tags':json.loads(r[3]),'source_id':r[4],'scope':r[5].split(':')[0]} for r in rows]
 
-    def change(self, sid, identity, action, content=None):
+    def manager_snapshot(self, sid, status='approved', offset=0, materialize=lambda value:value):
+        """One authorized snapshot; no global records, counts, paths or grant changes."""
+        if status not in ('approved','pending','trash'): raise ValueError('invalid_status')
+        if type(offset) is not int or not 0 <= offset <= 1000000000: raise ValueError('invalid_offset')
+        with closing(self.open()) as db:
+            db.execute('BEGIN IMMEDIATE')
+            state = self.state(db,sid)
+            scopes = self.scopes(sid,state)
+            rows = db.execute('SELECT id,kind,content,tags,source_id,scope,updated FROM stock_records WHERE scope IN (' + ','.join('?' for _ in scopes) + ') AND status=? ORDER BY updated DESC,id DESC LIMIT 13 OFFSET ?', scopes+[status,offset]).fetchall()
+            records = [{'version':hashlib.sha256(json.dumps([r[0],r[2],r[3],r[6],status]).encode()).hexdigest(),'id':r[0],'kind':r[1],'text':r[2],'tags':json.loads(r[3]),'source_id':r[4],
+                        'destination':('Project: '+state['project']) if r[5].startswith('project:') else ('Shared user memory in this profile' if r[5].startswith('user:') else 'This chat only')} for r in rows[:12]]
+            result = materialize({'store_identity':db.execute('SELECT identity FROM stock_read_epoch WHERE singleton=1').fetchone()[0], 'revision':state['revision'], 'project':state['project'], 'user_scope':state['user_scope'],
+                    'records':records,'status':status,'offset':offset,'next_offset':offset+12 if len(rows)>12 else None})
+            self.state(db,sid)
+            return result
+
+    def change(self, sid, identity, action, content=None, expected_revision=None, expected_record=None, expected_store=None):
         if action not in ('approve','trash','restore','edit'): raise ValueError('invalid_action')
         if content is not None: content = text(content)
         with closing(self.open()) as db, db:
             db.execute('BEGIN IMMEDIATE')
-            scopes = self.scopes(sid,self.state(db,sid))
-            row = db.execute('SELECT scope,status FROM stock_records WHERE id=?',(identity,)).fetchone()
+            state = self.state(db,sid)
+            if expected_revision is not None and state['revision'] != expected_revision: raise Denied('scope_changed_retry')
+            if expected_store is not None and expected_store != db.execute('SELECT identity FROM stock_read_epoch WHERE singleton=1').fetchone()[0]: raise Denied('memory_changed_retry')
+            scopes = self.scopes(sid,state)
+            row = db.execute('SELECT scope,status,content,tags,updated FROM stock_records WHERE id=?',(identity,)).fetchone()
             if not row or row[0] not in scopes: raise Denied('record_not_in_scope')
+            if expected_record is not None and expected_record != hashlib.sha256(json.dumps([identity,row[2],row[3],row[4],row[1]]).encode()).hexdigest(): raise Denied('record_changed_retry')
             status = {'approve':'approved','trash':'trash','restore':'pending'}.get(action,row[1])
             if action == 'edit':
                 if content is None: raise ValueError('text_required')

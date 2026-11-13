@@ -1,3 +1,4 @@
+import re
 """Stock Hermes tools and local user commands. No client edits or private APIs."""
 import json
 import shlex
@@ -107,6 +108,20 @@ class Runtime:
                 return encode(result)+'\n'+note
             if verb=='project' and args:
                 return encode(self.store.settings(sid,{'project':None if args==['off'] else ' '.join(args)}))
+            if verb == 'manager' and len(args) == 1:
+                data=json.loads(args[0])
+                if not isinstance(data,dict): raise ValueError('invalid_manager_request')
+                action=data.get('action')
+                allowed={'list':{'action','status','offset'},'save':{'action','revision','store_identity','kind','text'},
+                         'approve':{'action','revision','store_identity','id','version'},'trash':{'action','revision','store_identity','id','version'},'restore':{'action','revision','store_identity','id','version'}}
+                if action not in allowed or set(data)!=allowed[action]: raise ValueError('invalid_manager_request')
+                if action=='list': return self.store.manager_snapshot(sid,data['status'],data['offset'],materialize=encode)
+                if type(data['revision']) is not int or data['revision']<0: raise ValueError('invalid_revision')
+                if not isinstance(data['store_identity'],str) or not re.fullmatch(r'[a-f0-9]{32}',data['store_identity']): raise ValueError('invalid_store_identity')
+                if action=='save': return encode(self.store.insert(sid,data['kind'],data['text'],approved=True,expected_revision=data['revision'],expected_store=data['store_identity']))
+                if not isinstance(data['id'],str) or not re.fullmatch(r'[a-f0-9]{32}',data['id']): raise ValueError('invalid_record')
+                if not isinstance(data['version'],str) or not re.fullmatch(r'[a-f0-9]{64}',data['version']): raise ValueError('invalid_record_version')
+                return encode(self.store.change(sid,data['id'],action,expected_revision=data['revision'],expected_record=data['version'],expected_store=data['store_identity']))
             if verb in ('list','pending','trash') and (not args or (len(args)==1 and args[0].isdigit())):
                 offset=int(args[0]) if args else 0
                 rows=self.store.records(sid,status={'list':'approved','pending':'pending','trash':'trash'}[verb],offset=offset)

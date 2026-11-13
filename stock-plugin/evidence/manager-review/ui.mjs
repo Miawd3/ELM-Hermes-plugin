@@ -1,0 +1,9 @@
+import {readFileSync} from 'node:fs';import vm from 'node:vm';import assert from 'node:assert/strict';
+const src=readFileSync(new URL('../../desktop/plugin.js', import.meta.url),'utf8');
+const fn=src.slice(src.indexOf('function MemoryManager('),src.indexOf('function AccessSetup('));
+const helpers=src.split('// BEGIN INLINED MANAGER HELPERS\n')[1].split('// END INLINED MANAGER HELPERS')[0];
+const tick=()=>new Promise(r=>setTimeout(r,0));
+function harness(){let effects=[],states=[],refs=[],pending=[],cursor=0,valid=true;const c={TextEncoder,h:()=>null,buttonStyle:{},inputStyle:{},useState:x=>{let i=cursor++;states[i]=x;return [x,v=>states[i]=v]},useRef:x=>{let r={current:x};refs.push(r);return r},useEffect:fn=>effects.push(fn)};vm.createContext(c);vm.runInContext(helpers+'\n'+fn+'\nthis.Component=MemoryManager',c);c.Component({identity:{sid:'s',profile:'p',gateway:{request:(name,payload)=>new Promise(resolve=>pending.push({resolve,payload}))}},current:()=>valid});return {states,refs,effects,pending,invalidate:()=>valid=false}}
+const reply=()=>({output:JSON.stringify({store_identity:'1'.repeat(32),revision:1,records:[],status:'approved',offset:0,next_offset:null,project:null,user_scope:0})});
+const a=harness();const cleanup=a.effects[0]();assert.equal(a.pending.length,1);cleanup();a.effects[0]();assert.equal(a.pending.length,2);a.pending[0].resolve(reply());await tick();assert.equal(a.states[2],true);assert.ok(a.refs[1].current);a.pending[1].resolve(reply());await tick();assert.equal(a.states[2],false);assert.equal(a.states[0].revision,1);console.log('PASS exact shipped component: StrictMode cleanup/remount; old reply cannot clear newer flight');
+const b=harness();b.effects[0]();b.invalidate();b.pending[0].resolve(reply());await tick();assert.equal(b.states[0],null);console.log('PASS exact shipped component: invalidated owner cannot publish snapshot');

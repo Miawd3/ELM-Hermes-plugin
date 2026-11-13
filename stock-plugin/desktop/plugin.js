@@ -64,6 +64,27 @@ function accessPresentation(code) {
 }
 // END INLINED IDENTITY HELPERS
 
+// BEGIN INLINED MANAGER HELPERS
+// Pure helpers are inlined in the shipped ESM file (no relative imports).
+function managerCommand(payload) {
+  // POSIX shlex quoting, not JSON string quoting: preserves newlines and slashes.
+  return "elm manager '" + JSON.stringify(payload).replaceAll("'", "'\\''") + "'"
+}
+function memoryDestination(kind, snapshot) {
+  if (kind === 'user' && snapshot.user_scope === 1) return 'Shared user memory in this profile'
+  if (kind === 'project' && snapshot.project) return 'Project: ' + snapshot.project
+  return 'This chat only'
+}
+function parseManager(reply, listing=false) {
+  const raw = typeof reply === 'string' ? reply : reply?.output
+  let value
+  try { value = JSON.parse(raw) } catch { throw new Error('Unexpected response. Refresh before trying again.') }
+  if (!value || typeof value !== 'object' || value.error) throw new Error('Memory access or data changed. Refresh; renew this chat’s grant if needed.')
+  if (listing && (!/^[a-f0-9]{32}$/.test(value.store_identity) || !Number.isInteger(value.revision) || !Array.isArray(value.records) || value.records.length > 12 || !['approved','pending','trash'].includes(value.status) || !Number.isInteger(value.offset) || ![0,1].includes(value.user_scope) || (value.project !== null && typeof value.project !== 'string') || (value.next_offset !== null && !Number.isInteger(value.next_offset)) || value.records.some(r => !r || !/^[a-f0-9]{64}$/.test(r.version) || !/^[a-f0-9]{32}$/.test(r.id) || !['user','project','reference','skill'].includes(r.kind) || typeof r.text !== 'string' || typeof r.destination !== 'string' || !Array.isArray(r.tags) || r.tags.some(t=>typeof t !== 'string')))) throw new Error('Unexpected memory list. Refresh before trying again.')
+  return value
+}
+// END INLINED MANAGER HELPERS
+
 const buttonStyle = { border: '1px solid var(--ui-border)', borderRadius: 6, padding: '6px 12px' }
 const inputStyle = { ...buttonStyle, background: 'var(--ui-bg)', color: 'var(--ui-text)', width: '100%' }
 
@@ -138,6 +159,7 @@ function Settings() {
     visibleAccess && h(AccessSetup, { access: visibleAccess, sid, profile }),
     visibleState?.permissions_via_cli && h('p', { style: { fontSize: 12, opacity: .75 } }, 'Permissions are set with the local grant command for this exact chat. Any authenticated client of this chat shares access. You can turn memory off here.'),
     valid && h('button', { style: buttonStyle, disabled: busy, onClick: () => run() }, busy ? 'Loading…' : 'Refresh'),
+    visibleState?.enabled === 1 && h(MemoryManager,{key:[sid,profile,connectionId,epoch,visibleState.revision].join('|'),identity,current}),
     visibleState && h('div', { style: { display: 'grid', gap: 12 } },
       toggle('enabled', 'Memory', 'Approved recall joins your conversation and may reach its model provider.', ''),
       toggle('user_scope', 'Shared user facts', 'Use user facts from other local chats you explicitly enrolled.', 'user'),
@@ -149,6 +171,68 @@ function Settings() {
       toggle('organizer', 'Organizer', 'Explicit /elm organize sends the selected source for draft extraction. Review required; fees may apply.', 'organizer'),
       h('p', null, 'Models: Settings → Models → Auxiliary → ELM Search / ELM Organizer.'),
       h('p', null, 'Review: /elm pending · /elm approve <id>. Updates: use Hermes’s plugin manager.')
+    )
+  )
+}
+
+function MemoryManager({identity, current}) {
+  const [snapshot,setSnapshot] = useState(null)
+  const [error,setError] = useState('')
+  const [busy,setBusy] = useState(false)
+  const [kind,setKind] = useState('reference')
+  const [text,setText] = useState('')
+  const [confirm,setConfirm] = useState(null)
+  const alive=useRef(true), flight=useRef(false), generation=useRef(0)
+  const valid=()=>alive.current && current()
+  async function load(status='approved',offset=0,mutation=null) {
+    if (!valid() || flight.current) return
+    setBusy(true);setError('');setConfirm(null)
+    const token=++generation.current;flight.current=token
+    const active=()=>valid() && token===generation.current
+    try {
+      if (mutation) {
+        parseManager(await identity.gateway.request('slash.exec',{session_id:identity.sid,profile:identity.profile,command:managerCommand(mutation)}))
+        if (!active()) return
+        if (mutation.action==='save') setText('')
+      }
+      const reply=await identity.gateway.request('slash.exec',{session_id:identity.sid,profile:identity.profile,command:managerCommand({action:'list',status,offset})})
+      if (!active()) return
+      const next=parseManager(reply,true)
+      if(next.status!==status || next.offset!==offset) throw new Error('Unexpected memory page. Refresh.')
+      setSnapshot(next)
+    } catch(e) {
+      if(active()){setSnapshot(null);setError(e.message)}
+    } finally {if(flight.current===token)flight.current=false;if(active())setBusy(false)}
+  }
+  useEffect(()=>{alive.current=true;load();return()=>{alive.current=false;flight.current=false;++generation.current}},[])
+  const mutate=(action,record)=>{if(snapshot)load(snapshot.status,snapshot.offset,{action,id:record.id,version:record.version,revision:snapshot.revision,store_identity:snapshot.store_identity})}
+  return h('section',{style:{display:'grid',gap:12,border:'1px solid var(--ui-border)',borderRadius:8,padding:16}},
+    h('h3',null,'Memory in this chat'),
+    h('p',null,'Shows this chat’s records and explicitly shared memory available to it. Kind describes the information; destination controls who can recall it.'),
+    error && h('p',{role:'alert'},error),
+    h('button',{style:buttonStyle,disabled:busy,onClick:()=>load(snapshot?.status||'approved',snapshot?.offset||0)},busy?'Loading…':'Refresh memory'),
+    snapshot && h('div',{style:{display:'grid',gap:12}},
+      h('p',null,'Available destinations: this chat',snapshot.user_scope===1?' · shared user memory in this profile':'',snapshot.project?' · project: '+snapshot.project:''),
+      h('p',null,'Shared records can be reviewed or changed by other enrolled chats. No permissions are changed here. Approved records may be sent to your conversation’s model during recall.'),
+      h('fieldset',{disabled:busy,style:{display:'grid',gap:8}},h('legend',null,'Save a memory'),
+        h('label',null,'Kind ',h('select',{value:kind,onChange:e=>setKind(e.target.value)},...['reference','user','project','skill'].map(k=>h('option',{key:k,value:k},k==='user'?'User fact':k[0].toUpperCase()+k.slice(1))))),
+        h('p',null,'Will save to: ',h('strong',null,memoryDestination(kind,snapshot))),
+        h('textarea',{style:{...inputStyle,minHeight:90},value:text,maxLength:8000,'aria-label':'Memory text',placeholder:'Write the fact or note to remember. Avoid secrets.',onChange:e=>setText(e.target.value)}),
+        h('small',null,'Saved immediately as approved. UTF-8 limit: 8,000 bytes. Skill notes are memory records, not installed executable skills.'),
+        h('button',{style:buttonStyle,disabled:!text.trim()||new TextEncoder().encode(text).length>8000,onClick:()=>load('approved',0,{action:'save',revision:snapshot.revision,store_identity:snapshot.store_identity,kind,text})},'Save approved memory')),
+      h('div',{role:'group','aria-label':'Record status'},...['approved','pending','trash'].map(status=>h('button',{key:status,style:buttonStyle,disabled:busy,'aria-pressed':snapshot.status===status,onClick:()=>load(status,0)},status==='pending'?'Needs review':status[0].toUpperCase()+status.slice(1)))),
+      snapshot.records.length===0 && h('p',null,'No records on this page.'),
+      ...snapshot.records.map(record=>h('article',{key:record.id,style:{border:'1px solid var(--ui-border)',borderRadius:6,padding:12,display:'grid',gap:8}},
+        h('strong',null,record.kind+' · '+record.destination),
+        h('p',{style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}},record.text),
+        record.tags.length>0 && h('small',null,'Tags: '+record.tags.join(', ')),
+        record.source_id && h('small',null,'Source-linked record'),
+        snapshot.status==='pending' && h('button',{style:buttonStyle,disabled:busy,onClick:()=>mutate('approve',record)},'Approve for recall'),
+        snapshot.status==='trash' ? h('button',{style:buttonStyle,disabled:busy,onClick:()=>mutate('restore',record)},'Restore to review') :
+          confirm===record.id ? h('div',null,h('p',null,'Move this record to Trash? This affects its shared destination too. Existing copies are not removed.'),h('button',{style:buttonStyle,disabled:busy,onClick:()=>mutate('trash',record)},'Move to Trash'),h('button',{style:buttonStyle,disabled:busy,onClick:()=>setConfirm(null)},'Cancel')) : h('button',{style:buttonStyle,disabled:busy,onClick:()=>setConfirm(record.id)},'Trash…')
+      )),
+      h('div',null,h('button',{style:buttonStyle,disabled:busy||snapshot.offset===0,onClick:()=>load(snapshot.status,Math.max(0,snapshot.offset-12))},'Previous'),h('span',null,' Page '+(Math.floor(snapshot.offset/12)+1)+' '),h('button',{style:buttonStyle,disabled:busy||snapshot.next_offset===null,onClick:()=>load(snapshot.status,snapshot.next_offset)},'Next')),
+      h('small',null,'Trash is recoverable; restore returns records to review. Existing model context and copied notes are not erased. Concurrent changes may shift pages; refresh to update.')
     )
   )
 }
