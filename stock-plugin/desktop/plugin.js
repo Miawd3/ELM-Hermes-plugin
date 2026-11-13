@@ -39,7 +39,13 @@ function sameIdentity(expected, actual) {
 function parseStatus(reply) {
   const raw = typeof reply === 'string' ? reply : reply?.output
   if (typeof raw !== 'string') throw new Error('Settings unavailable. Use /elm status in this chat.')
-  const value = JSON.parse(raw)
+  let value
+  try { value = JSON.parse(raw) } catch { throw new Error('Settings unavailable. Refresh or check the Hermes connection.') }
+  if (value && typeof value.error === 'string') {
+    const error = new Error('Settings unavailable.')
+    error.code = value.error
+    throw error
+  }
   if (!value || typeof value !== 'object' || value.error || !Number.isInteger(value.revision)) {
     throw new Error('Settings unavailable. Use /elm status in this chat.')
   }
@@ -48,6 +54,13 @@ function parseStatus(reply) {
   }
   if (value.project !== null && typeof value.project !== 'string') throw new Error('Invalid project.')
   return value
+}
+function accessPresentation(code) {
+  if (code === 'exact_session_cli_grant_required') return {kind:'locked', title:'Memory needs permission for this chat', text:'This chat has no active grant. It may be new, expired or revoked. Saved memories have not been deleted.'}
+  if (code === 'local_grant_expired_or_changed') return {kind:'locked', title:'Memory permission changed or expired', text:'Renew the exact-chat grant from the correct Hermes profile, then refresh.'}
+  if (code === 'enable_this_chat_with_slash_elm_on' || code === 'off') return {kind:'locked', title:'Memory is off for this chat', text:'Saved data is kept. Unified Desktop chats need the local grant command to enable access again.'}
+  if (code === 'local_session_required') return {kind:'unsupported', title:'This session type is not supported', text:'ELM currently supports explicitly enrolled local chats. Memory access is not enabled for this session.'}
+  return {kind:'unavailable', title:'Memory settings unavailable', text:'Check the Hermes connection and refresh. This is not a confirmed permission problem.'}
 }
 // END INLINED IDENTITY HELPERS
 
@@ -65,12 +78,14 @@ function Settings() {
   const [project, setProject] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [access, setAccess] = useState(null)
   const generation = useRef(0)
   const gateway = host.getGateway()
   const epoch = useGatewayActivationEpoch()
   const identity = { sid, profile, connectionId, gateway, gatewayState, owner, epoch }
   const valid = usableIdentity(identity)
   const visibleState = sameIdentity(stateOwner, identity) ? state : null
+  const visibleAccess = sameIdentity(stateOwner, identity) ? access : null
   const current = () => sameIdentity(identity, {
     sid: host.state.focusedSessionId.get(), profile: host.state.profile.get(),
     connectionId: host.state.connectionId.get(), gateway: host.getGateway(),
@@ -81,7 +96,7 @@ function Settings() {
   async function run(command = null) {
     if (!valid || !current()) return
     const token = ++generation.current
-    setBusy(true); setError('')
+    setBusy(true); setError(''); setAccess(null)
     try {
       if (command) {
         // This is the public, authenticated slash-command route, not a direct database RPC.
@@ -91,21 +106,21 @@ function Settings() {
       }
       if (!current() || token !== generation.current) return
       if (command === 'off') {
-        setState(null); setError('Memory is off for this chat. Saved data is kept. Use the local grant command to renew unified-session access.'); return
+        setStateOwner(identity); setState(null); setAccess(accessPresentation('off')); setError('Memory is off for this chat. Saved data is kept.'); return
       }
       const reply = await gateway.request('slash.exec', { session_id: sid, profile, command: 'elm status' })
       if (!current() || token !== generation.current) return
       const next = parseStatus(reply)
-      setStateOwner(identity); setState(next); setProject(next.project || '')
+      setStateOwner(identity); setState(next); setAccess(null); setProject(next.project || '')
     } catch (e) {
-      if (current() && token === generation.current) { setState(null); setError(e?.message || 'Settings unavailable.') }
+      if (current() && token === generation.current) { setStateOwner(identity); setState(null); setAccess(accessPresentation(e?.code)); setError('') }
     } finally {
       if (current() && token === generation.current) setBusy(false)
     }
   }
 
   useEffect(() => {
-    ++generation.current; setState(null); setProject(''); setError(''); setBusy(false)
+    ++generation.current; setState(null); setAccess(null); setProject(''); setError(''); setBusy(false)
     if (valid) run()
     return () => { ++generation.current }
   }, [sid, profile, connectionId, gatewayState, gateway, owner?.connectionId, owner?.profile, epoch])
@@ -119,7 +134,8 @@ function Settings() {
     h('h2', { style: { fontSize: 18, fontWeight: 600 } }, 'ELM · focused chat'),
     h(VisualSettings),
     h('p', null, valid ? 'Settings apply to the focused local chat, not every chat.' : 'Focus a saved local chat on the active connection to configure ELM.'),
-    error && h('p', { role: 'alert' }, error),
+    sameIdentity(stateOwner, identity) && error && h('p', { role: 'status' }, error),
+    visibleAccess && h(AccessSetup, { access: visibleAccess, sid, profile }),
     visibleState?.permissions_via_cli && h('p', { style: { fontSize: 12, opacity: .75 } }, 'Permissions are set with the local grant command for this exact chat. Any authenticated client of this chat shares access. You can turn memory off here.'),
     valid && h('button', { style: buttonStyle, disabled: busy, onClick: () => run() }, busy ? 'Loading…' : 'Refresh'),
     visibleState && h('div', { style: { display: 'grid', gap: 12 } },
@@ -134,6 +150,26 @@ function Settings() {
       h('p', null, 'Models: Settings → Models → Auxiliary → ELM Search / ELM Organizer.'),
       h('p', null, 'Review: /elm pending · /elm approve <id>. Updates: use Hermes’s plugin manager.')
     )
+  )
+}
+
+function AccessSetup({access, sid, profile}) {
+  const locked = access.kind === 'locked'
+  return h('div', {style:{display:'grid',gap:12,border:'1px solid var(--ui-border)',borderRadius:8,padding:16}},
+    h('div', {role:'status'}, h('strong',null,access.title), h('p',null,access.text)),
+    locked && h('div',null,
+      h('p',null,'1. Open a terminal using this chat’s actual Hermes profile and Hermes Python environment.'),
+      h('p',null,'2. Follow the setup guide: verify --show-home, then grant this exact session with --expect-home. Do not use the parent directory of a named profile.'),
+      h('p',null,'3. Return here and select Refresh.'),
+      h('p',null,'Selected profile label: ',h('code',null,typeof profile === 'string' ? profile : '(not available)')),
+      h('p',null,'Focused runtime session ID: ',h('code',{style:{overflowWrap:'anywhere'}},sid)),
+      h('small',null,'Verify the full ID with Hermes sessions list. A profile label is not a filesystem path. Grants expire after 24 hours by default; authenticated clients of this same session share access.'),
+      h('p',null,h('a',{href:'https://github.com/Miawd3/ELM-Hermes-plugin/blob/main/stock-plugin/README.md',target:'_blank',rel:'noopener noreferrer'},'Open setup guide'))),
+    locked && h('fieldset',{disabled:true,style:{display:'grid',gap:6,border:'1px solid var(--ui-border)',padding:12}},
+      h('legend',null,'Memory controls · locked until access is granted'),
+      ...['Memory recall','Shared user facts','Project memory','Conversation capture','Search agent','Organizer'].map(label=>h('label',{key:label},h('input',{type:'checkbox',disabled:true,checked:false,readOnly:true}), ' ',label)),
+      h('small',null,'These are available features, not the saved settings for this chat. Sharing and model access require explicit grant options; they are not enabled automatically.')),
+    h('p',{style:{fontSize:12,opacity:.75}},'Not included in this plugin: native chat folders, timeline markers and whole-message bubble styling. Inline answer cards above are a separate display feature.')
   )
 }
 
