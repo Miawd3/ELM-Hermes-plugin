@@ -1,3 +1,11 @@
+# Stock-Hermes plugin candidate
+
+A **no-host-patch candidate** is now available in [`stock-plugin/`](stock-plugin/), with a scoped search agent, opt-in organizer, model choices, approval workflow, starter skills and concise settings. [Install and limits →](stock-plugin/README.md)
+
+It is a separate candidate, not full parity with the earlier patched UI: native chat folders, timeline highlighting and whole-message styling are not provided. Automated stock API tests pass; full Desktop/Windows and live-provider acceptance remain pending. Earlier source and history below are preserved unchanged.
+
+---
+
 # ELM · Keep the knowledge. Bring what matters.
 
 ## Install first

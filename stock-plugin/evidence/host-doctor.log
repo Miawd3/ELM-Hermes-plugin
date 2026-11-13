@@ -1,0 +1,4 @@
+Plugin Doctor: <candidate-plugin>
+  manifest: elm 0.2.0-stock-candidate (standalone)
+  OK: runtime discovery, manifest parsing, import, and registration passed
+  registrations: 1 tool(s), 2 hook(s)

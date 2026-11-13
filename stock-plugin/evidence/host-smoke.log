@@ -1,0 +1,1 @@
+PASS: stock public plugin_db, profile switching, no cross-profile grant/data, retained data after reopening; no model calls.
