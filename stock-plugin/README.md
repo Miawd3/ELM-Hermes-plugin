@@ -15,7 +15,7 @@ hermes plugins install "https://github.com/Miawd3/ELM-Hermes-plugin.git#stock-pl
 hermes plugins enable elm
 ```
 
-Restart Hermes, open a saved local chat, and type `/elm on`. Settings: **Settings → Plugins → ELM**; model choices: **Settings → Models → Auxiliary**. Do not install the old `elm/` directory for this route.
+Restart Hermes. In Desktop, open **Capabilities → Plugins**, find **ELM**, and switch it **On**. This Desktop toggle can remain off even after CLI activation. Open a saved local chat and type `/elm on`. Settings: **Settings → Plugins → ELM**; model choices: **Settings → Models → Auxiliary**. Do not install the old `elm/` directory for this route.
 
 **Do not apply a host patch.** This candidate uses stock plugin APIs, qualified against Hermes commit `126980e47b826963b26bf57d210106d849322f8a`. This is not full Desktop/Windows or live-provider acceptance. Back up your existing profile first; do not overwrite an older ELM installation. It uses a new database and does not migrate legacy data.
 
@@ -69,3 +69,9 @@ Pinned unmodified Hermes source `126980e47b826963b26bf57d210106d849322f8a`:
 - Real public `plugin_db` smoke test passed with two disposable profile homes and reopening persisted data.
 
 No live provider request or paid model call was made. Desktop settings JavaScript passes syntax checking and 19 owner/status guards plus 6 shipped UI contract checks (connection/socket swaps, focused-owner mismatch, stale responses). It uses the captured gateway socket and explicit profile/session; it never falls back to a different source. No visual acceptance is claimed. No full Desktop/Windows walkthrough of this newly scoped package has been performed. The older patched candidate's 176/74 tests and screenshots **do not qualify this new package**.
+
+## Real Desktop follow-up
+
+The pinned GitHub installation succeeded in a fresh disposable profile; installed files matched the source manifest. In an unmodified stock Desktop build, enabling ELM through Capabilities registered its settings page, and the page correctly refused configuration without a saved local chat.
+
+A no-provider session could not be established in this environment: the host logged `storage_unavailable / invalid policy`, followed by `Gateway ticket bootstrap failed` on unrelated APIs. This does **not** establish that ELM caused those failures. Saved-session controls, search and model-selection behavior remain unverified in the actual Desktop UI. No paid provider calls were made.
