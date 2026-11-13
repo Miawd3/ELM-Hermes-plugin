@@ -169,11 +169,20 @@ class Store:
             scopes = self.scopes(sid,state)
             where = 'scope IN (' + ','.join('?' for _ in scopes) + ') AND status=?'
             params = scopes + [status]
-            # Parameterized LIKE, literal escaping, scope-first SQL filtering; no global scan in Python.
+            # Rank scoped matches BEFORE LIMIT. Repeated query terms do not add weight;
+            # substring matching remains compatible with identifiers and Unicode aliases.
+            # This is lexical coverage, not semantic confidence or answer correctness.
+            order = 'updated DESC,id DESC'
+            rank_params = []
             if words:
-                where += ' AND (' + ' OR '.join("search_text LIKE ? ESCAPE '\\'" for _ in words) + ')'
-                params += ['%' + word.replace('\\','\\\\').replace('%','\\%').replace('_','\\_') + '%' for word in words]
-            rows = db.execute('SELECT id,kind,content,tags,source_id,scope FROM stock_records WHERE '+where+' ORDER BY updated DESC,id DESC LIMIT ? OFFSET ?', params+[limit,offset]).fetchall()
+                patterns = ['%' + word.replace('\\','\\\\').replace('%','\\%').replace('_','\\_') + '%' for word in words]
+                predicate = "search_text LIKE ? ESCAPE '\\'"
+                where += ' AND (' + ' OR '.join(predicate for _ in words) + ')'
+                params += patterns
+                coverage = ' + '.join('CASE WHEN ' + predicate + ' THEN 1 ELSE 0 END' for _ in words)
+                order = '(' + coverage + ') DESC,updated DESC,id DESC'
+                rank_params = patterns
+            rows = db.execute('SELECT id,kind,content,tags,source_id,scope FROM stock_records WHERE '+where+' ORDER BY '+order+' LIMIT ? OFFSET ?', params+rank_params+[limit,offset]).fetchall()
             return [{'id':r[0],'kind':r[1],'text':r[2],'tags':json.loads(r[3]),'source_id':r[4],'scope':r[5].split(':')[0]} for r in rows]
 
     def change(self, sid, identity, action, content=None):

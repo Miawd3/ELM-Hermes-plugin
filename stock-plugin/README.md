@@ -25,11 +25,32 @@ Stock unified Desktop commands currently report only `local`, not a trustworthy 
 
 1. In Desktop, send `/elm status` to create/save the chat. An access error is expected before the grant.
 2. In a terminal using the **same Hermes profile**, run `hermes sessions list` and copy that chat's full session ID, not its title.
-3. Change directory to that profile's `plugins/elm` folder. Using the Python environment that runs Hermes:
+3. **Set the actual profile home explicitly before running Python.** Changing directory alone does not select a Hermes profile. In particular, `hermes -p NAME ...` selects a profile for that Hermes command; it does not make a later standalone Python process use the same profile. For a named profile, use its actual home (often `<root>/profiles/NAME`), not merely the root.
+4. Use Hermes's own Python interpreter. In PowerShell, replace both placeholder paths with your actual installation/profile paths:
+
+```powershell
+$env:HERMES_HOME = "C:\ACTUAL\ROOT\profiles\TEST_PROFILE"
+$HermesPython = "C:\ACTUAL\HERMES\venv\Scripts\python.exe"
+Set-Location (Join-Path $env:HERMES_HOME "plugins\elm")
+& $HermesPython -m elm_plugin.local_grant --show-home
+```
+
+Verify the printed `hermes_home` is the profile used by the Desktop chat. Do not simply accept a default path. Then:
+
+```powershell
+& $HermesPython -m elm_plugin.local_grant "EXACT_SESSION_ID" --expect-home "$env:HERMES_HOME" --allow-session-clients
+```
+
+On Linux/macOS, use the equivalent explicit environment and Hermes interpreter:
 
 ```sh
-python -m elm_plugin.local_grant "EXACT_SESSION_ID" --allow-session-clients
+export HERMES_HOME="/absolute/path/to/the/actual/profile"
+cd "$HERMES_HOME/plugins/elm"
+/path/to/hermes/python -m elm_plugin.local_grant --show-home
+/path/to/hermes/python -m elm_plugin.local_grant "EXACT_SESSION_ID" --expect-home "$HERMES_HOME" --allow-session-clients
 ```
+
+The helper refuses a missing or mismatched `--expect-home` before opening memory storage. Successful output includes the resolved target path. This guards accidental environment fallback; it cannot prove you chose the right Desktop profile or session. Use `--expect-home` for renewals and revocation too. It does not automatically move or delete a grant previously written to another profile.
 
 Default: this chat only, 24 hours, no shared user/project scope, no capture, no model calls. Any authenticated client that can operate this **same session** shares the permission, including an ACP client; this is not proof of a human. No other session is enrolled. Do not grant sessions you do not trust.
 
@@ -59,6 +80,12 @@ Scope-setting slash commands below apply to classic CLI/TUI. For unified Desktop
 Plugin-owned profile-local SQLite storage; separate `user`, `project`, `reference` and `skill` record kinds and tags; pending/approved/trash states; manual review, edit and restore; source-linked proposals; explicit per-chat project/user scope sharing; opt-in turn capture; local keyword recall; a bounded dedicated search query planner and source organizer through official `ctx.llm`; native model-assignment slots; concise desktop settings; seven original progressively loaded skills.
 
 The planner sends **only the search query**, never the memory database, and returns up to two alternative queries. Scope and local search stay deterministic. Original query is always searched. Failure falls back to local search. At most one plugin completion per explicit agent search, with 192 output tokens and 15-second timeout. Hermes/provider routing may have its own retries and fees. These limits are **not a dollar spending cap**. Automatic per-turn recall never calls the planner.
+
+## Local search ordering
+
+Search ranks permitted records by the number of **distinct query words matched**, then by most recent update. Ranking happens before the result limit, so many recent one-word matches no longer automatically bury an older record matching the whole query. Substring matching (including Unicode and literal underscores), status filters and scope grants are preserved. Unqueried list views remain newest-first.
+
+This is a targeted lexical fix, not semantic confidence: stopwords and keyword-rich irrelevant notes can still misrank. It does not solve paraphrases, long-record packing or prove benchmark improvement. Ranking adds work; the reproducible synthetic latency probe in `tests/search_ranking_probe.py` records that tradeoff. No new model calls or storage migrations are introduced.
 
 ## Draft a skill from selected long-term notes
 

@@ -1,0 +1,18 @@
+[
+  {
+    "records": 1000,
+    "baseline_target_present": false,
+    "ranked_target_first": true,
+    "baseline_p50_ms": 0.771632499890984,
+    "ranked_p50_ms": 0.9097550000660704,
+    "note": "Warm synthetic common-term workload; same full Store.records API, database, query and limit. Not end-to-end app performance."
+  },
+  {
+    "records": 10000,
+    "baseline_target_present": false,
+    "ranked_target_first": true,
+    "baseline_p50_ms": 5.4545550005968835,
+    "ranked_p50_ms": 6.495241000266105,
+    "note": "Warm synthetic common-term workload; same full Store.records API, database, query and limit. Not end-to-end app performance."
+  }
+]
