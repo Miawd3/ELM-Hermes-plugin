@@ -1,10 +1,10 @@
 name: elm
-version: 0.2.1-stock-candidate
+version: 0.2.1-preview
 description: "Local scoped memory, reviewed facts, skills and opt-in query planning. No host patches."
 author: ELM plugin contributors
 license: Apache-2.0
 kind: standalone
-requires_hermes: ">=0.22.7"
+requires_hermes: ">=0.23.1"
 python_dependencies: []
 requires_env: []
 provides_tools:

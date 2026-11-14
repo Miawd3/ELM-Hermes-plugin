@@ -25,6 +25,16 @@ HELP = ('ELM: /elm help | diagnostics (no memory or permission checks)\n'
         'Capture saves plain-text turns locally; never enable it for secrets.')
 
 
+GRANT_ERRORS = ('exact_session_cli_grant_required','local_grant_expired_or_changed','change_permissions_with_local_grant_cli')
+
+
+def grant_hint(session_id):
+    """Human next step for local chats. Only a plain ID is echoed into a shell line."""
+    if isinstance(session_id, str) and re.fullmatch(r'[A-Za-z0-9._:-]{1,200}', session_id):
+        return f'ELM is not on for this chat. In a terminal run: hermes elm grant {session_id}  (add -p PROFILE for a named profile)'
+    return 'ELM is not on for this chat. In a terminal run: hermes elm grant  and pick this chat.'
+
+
 def encode(value):
     return json.dumps(value,ensure_ascii=False)
 
@@ -245,7 +255,12 @@ class Runtime:
                 return encode(self.search(sid,' '.join(args),agent=verb=='agent-search'))
             return HELP
         except (ValueError,TypeError) as exc:
-            return encode({'error':str(exc)})
+            error = {'error':str(exc)}
+            if str(exc) in GRANT_ERRORS:
+                error['hint'] = grant_hint(session_id)
+            elif str(exc) == 'enable_this_chat_with_slash_elm_on':
+                error['hint'] = 'Type /elm on in this chat to turn ELM on.'
+            return encode(error)
         except Exception:
             return encode({'error':'elm_operation_failed; saved data was not migrated'})
 

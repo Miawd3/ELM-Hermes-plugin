@@ -86,9 +86,53 @@ def _listed(limit=15):
         return None
 
 
+def plugin_version():
+    from pathlib import Path
+    manifest = Path(__file__).resolve().parent.parent / 'plugin.yaml'
+    try:
+        for line in manifest.read_text(encoding='utf-8').splitlines():
+            if line.startswith('version:'):
+                return line.split(':', 1)[1].strip()
+    except OSError:
+        pass
+    return 'unknown'
+
+
+def hermes_version():
+    from importlib import metadata
+    try:
+        version = metadata.version('hermes-agent')
+    except metadata.PackageNotFoundError:
+        version = '0.0.0'
+    return version if version != '0.0.0' else '(see `hermes version`)'
+
+
+def doctor(store):
+    """Privacy-safe status for bug reports: versions, paths and counts. No memory text or chat IDs."""
+    import platform
+    from hermes_constants import display_hermes_home
+    print(f'ELM {plugin_version()} on Hermes {hermes_version()} ({platform.system()} {platform.release()}, Python {platform.python_version()})')
+    print(f'Profile: {display_hermes_home()}')
+    try:
+        health = store.health()
+    except Exception as exc:
+        print(f'Storage: ERROR {type(exc).__name__}: {str(exc)[:200]}')
+        return 1
+    records = health.pop('records')
+    print('Storage: ok' if health['integrity'] == 'ok' else f"Storage: integrity {health['integrity']}")
+    for key, value in health.items():
+        if key != 'integrity':
+            print(f'  {key.replace("_", " ")}: {value}')
+    print(f"  records: {records['approved']} approved, {records['pending']} pending, {records['trash']} in trash")
+    print('Contains counts only; safe to paste into a bug report.')
+    return 0
+
+
 def run(args, store_factory):
     from hermes_constants import display_hermes_home
     store = store_factory()
+    if args.elm_command == 'doctor':
+        return doctor(store)
     if args.elm_command == 'sessions':
         rows = _listed(args.limit)
         if rows is None:
@@ -135,6 +179,7 @@ def setup_cli(parser, store_or_factory):
                        help='Skip the confirmation prompt')
     revoke = subs.add_parser('revoke', help='Turn ELM off for one chat (saved memories are kept)')
     revoke.add_argument('session', nargs='?', help='Chat ID; omit to pick from recent chats')
+    subs.add_parser('doctor', help='Show versions, storage health and counts (safe for bug reports)')
     sessions = subs.add_parser('sessions', help='List recent chats with their IDs')
     sessions.add_argument('--limit', type=int, default=15)
 

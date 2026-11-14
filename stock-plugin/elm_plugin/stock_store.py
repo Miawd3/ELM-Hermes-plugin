@@ -129,6 +129,24 @@ class Store:
         with closing(self.open()) as db:
             return self.root(db, sid)
 
+    def health(self):
+        """Counts only (never content or IDs), for `hermes elm doctor` and bug reports."""
+        now = time.time()
+        with closing(self.open()) as db:
+            count = lambda sql, *a: db.execute(sql, a).fetchone()[0]
+            records = dict(db.execute('SELECT status, COUNT(*) FROM stock_records GROUP BY status').fetchall())
+            return {
+                'schema_version': count('PRAGMA user_version'),
+                'chats_with_elm_state': count('SELECT COUNT(*) FROM stock_sessions'),
+                'chats_enabled': count('SELECT COUNT(*) FROM stock_sessions WHERE enabled=1'),
+                'active_local_grants': count('SELECT COUNT(*) FROM stock_local_grants WHERE expires>?', now),
+                'expired_local_grants': count('SELECT COUNT(*) FROM stock_local_grants WHERE expires<=?', now),
+                'records': {k: records.get(k, 0) for k in ('approved', 'pending', 'trash')},
+                'captured_sources': count('SELECT COUNT(*) FROM stock_sources'),
+                'compaction_links': count('SELECT COUNT(*) FROM stock_session_alias'),
+                'integrity': db.execute('PRAGMA quick_check').fetchone()[0],
+            }
+
     def resolve_quiet(self, session_id):
         """Alias-resolved key with no permission check; for process-local cache bookkeeping only."""
         sid = _hash(session_id)

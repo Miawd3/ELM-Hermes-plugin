@@ -96,6 +96,19 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn('hermes sessions list', out)
 
+    def test_doctor_reports_counts_without_content(self):
+        self.run_cli('grant', 'S1', '--yes')
+        sid = self.store.resolve('S1', 'local')
+        self.store.insert(sid, 'reference', 'secret door code 4411', approved=True)
+        code, out = self.run_cli('doctor')
+        self.assertEqual(code, 0)
+        self.assertIn('Storage: ok', out)
+        self.assertIn('1 approved', out)
+        self.assertIn('active local grants: 1', out)
+        self.assertNotIn('4411', out)
+        self.assertNotIn('S1', out)
+        self.assertNotIn(sid, out)
+
     def test_no_subcommand_prints_help(self):
         self.assertEqual(self.run_cli()[0], 0)
 

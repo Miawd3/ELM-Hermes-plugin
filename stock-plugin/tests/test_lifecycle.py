@@ -147,6 +147,21 @@ class DeleteTests(Base):
         self.assertEqual(len(self.search('door', sid='b')['results']), 1)
 
 
+class HintTests(Base):
+    def test_local_denial_explains_next_step(self):
+        out = json.loads(self.cmd('status', sid='abc-123', platform='local'))
+        self.assertEqual(out['error'], 'exact_session_cli_grant_required')
+        self.assertIn('hermes elm grant abc-123', out['hint'])
+
+    def test_hint_never_echoes_unsafe_id(self):
+        out = json.loads(self.cmd('status', sid='x; rm -rf ~', platform='local'))
+        self.assertNotIn('rm -rf', out['hint'])
+
+    def test_classic_cli_hint(self):
+        out = json.loads(self.cmd('search door', sid='z', platform='cli'))
+        self.assertIn('/elm on', out['hint'])
+
+
 class RecallTests(Base):
     def setUp(self):
         super().setUp()
