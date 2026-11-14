@@ -25,44 +25,32 @@ Restart Hermes. In Desktop, open **Capabilities → Plugins**, find **ELM**, and
 
 **Do not apply a host patch.** This candidate uses stock plugin APIs, qualified against Hermes commit `126980e47b826963b26bf57d210106d849322f8a`. This is not full Desktop/Windows or live-provider acceptance. Back up your existing profile first; do not overwrite an older ELM installation. It uses a new database and does not migrate legacy data.
 
-## Desktop: grant one chat locally
+## Desktop: grant one chat from your terminal
 
-Stock unified Desktop commands currently report only `local`, not a trustworthy Desktop-versus-ACP identity. ELM therefore refuses access until you explicitly grant **one exact session** from a local terminal. This is not one-click activation.
+Hermes reports Desktop, TUI and editor (ACP) chats all as `local`, so ELM cannot tell which app is asking. It therefore waits until you grant **one exact chat** from a terminal on this computer. The model can never grant access.
 
-1. In Desktop, send `/elm status` to create/save the chat. An access error is expected before the grant.
-2. In a terminal using the **same Hermes profile**, run `hermes sessions list` and copy that chat's full session ID, not its title.
-3. **Set the actual profile home explicitly before running Python.** Changing directory alone does not select a Hermes profile. In particular, `hermes -p NAME ...` selects a profile for that Hermes command; it does not make a later standalone Python process use the same profile. For a named profile, use its actual home (often `<root>/profiles/NAME`), not merely the root.
-4. Use Hermes's own Python interpreter. In PowerShell, replace both placeholder paths with your actual installation/profile paths:
-
-```powershell
-$env:HERMES_HOME = "C:\ACTUAL\ROOT\profiles\TEST_PROFILE"
-$HermesPython = "C:\ACTUAL\HERMES\venv\Scripts\python.exe"
-Set-Location (Join-Path $env:HERMES_HOME "plugins\elm")
-& $HermesPython -m elm_plugin.local_grant --show-home
-```
-
-Verify the printed `hermes_home` is the profile used by the Desktop chat. Do not simply accept a default path. Then:
-
-```powershell
-& $HermesPython -m elm_plugin.local_grant "EXACT_SESSION_ID" --expect-home "$env:HERMES_HOME" --allow-session-clients
-```
-
-On Linux/macOS, use the equivalent explicit environment and Hermes interpreter:
+1. In Desktop, send any message in the chat (or `/elm status`) so the chat is saved. **Settings → Plugins → ELM** shows the exact command for the focused chat.
+2. In a terminal, run it, for example:
 
 ```sh
-export HERMES_HOME="/absolute/path/to/the/actual/profile"
-cd "$HERMES_HOME/plugins/elm"
-/path/to/hermes/python -m elm_plugin.local_grant --show-home
-/path/to/hermes/python -m elm_plugin.local_grant "EXACT_SESSION_ID" --expect-home "$HERMES_HOME" --allow-session-clients
+hermes elm grant                 # lists your recent chats; type the number of this chat, then y
+hermes elm grant <chat-id>       # or grant an ID directly
+hermes -p work elm grant         # for a named profile
 ```
 
-The helper refuses a missing or mismatched `--expect-home` before opening memory storage. Successful output includes the resolved target path. This guards accidental environment fallback; it cannot prove you chose the right Desktop profile or session. Use `--expect-home` for renewals and revocation too. It does not automatically move or delete a grant previously written to another profile.
+3. Back in Desktop, select **Refresh** in the ELM settings page, or send `/elm status`.
 
-Default: this chat only, 24 hours, no shared user/project scope, no capture, no model calls. Any authenticated client that can operate this **same session** shares the permission, including an ACP client; this is not proof of a human. No other session is enrolled. Do not grant sessions you do not trust.
+Default: this chat only, 24 hours, no sharing, no capture, no model calls. Options: `--project NAME`, `--user`, `--capture`, `--agent`, `--organizer`, `--hours N` (max 168), `--yes` (skip the prompt). Renewing replaces all options; omitted ones reset to off. `hermes elm revoke [<chat-id>]` turns ELM off for a chat and keeps its data. `hermes elm sessions` lists recent chats with their IDs.
 
-Use `/elm save reference A test fact`, then `/elm search test`. `/elm off` revokes access and keeps data. To renew or change permissions, rerun the local command with the complete desired options: `--project "MyGame"`, `--user`, `--capture`, `--agent`, `--organizer`, `--hours 24` (maximum 168). Omitted options reset to off. Agent/organizer options permit provider calls and fees; capture saves plaintext. `--revoke` disables a session without renewing it. Read `--help` first.
+Any authenticated client connected to that **same chat** shares the grant, including an ACP editor client. No other chat is enrolled; new chats and `/branch` copies need their own grant.
 
-Desktop settings show current permissions and can switch memory off. They cannot enlarge a unified session's grant. New chats and branches need separate explicit grants. This temporary bridge does not modify Hermes or its policy receipts.
+The older `python -m elm_plugin.local_grant ... --expect-home` helper still works but is no longer needed: `hermes elm` runs inside the profile Hermes selected.
+
+## Long chats, deleted chats and automatic recall
+
+- **Compression:** when Hermes compresses a long chat into a new session ID, ELM moves that chat's grant, settings and chat-only memory to the new ID automatically.
+- **Deleting a chat** (not archiving) permanently removes its chat-only memories, captured sources and settings. Project and shared user memories stay. Archived chats keep everything. Deletes made from a process where ELM is not loaded can be missed; nothing else is affected.
+- **Automatic recall** ignores greetings, acknowledgements and slash commands, searches only meaningful words (common words like "the" or "my" are dropped), requires a note to match enough of them, and does not inject the same note twice in a chat until Hermes compresses it. Explicit `/elm search` and the `elm_memory` tool still match any word.
 
 ## Focused-chat memory manager (experimental)
 
@@ -156,7 +144,7 @@ Pinned unmodified Hermes source `126980e47b826963b26bf57d210106d849322f8a`:
 
 - Official `hermes plugins validate`: all checks passed; no private-import/core-override warning.
 - Official Plugin Doctor: runtime discovery, import and registration passed (1 tool, 2 hooks).
-- 55 standard-library tests passed, including model scope spoofing, no-default egress, approval, source bounds, gateway refusal and cross-profile storage-factory switching.
+- 0.2.0: 55 standard-library tests passed, including model scope spoofing, no-default egress, approval, source bounds, gateway refusal and cross-profile storage-factory switching. 0.2.1: 132 tests pass, including compaction rotation, chat deletion, recall relevance and the `hermes elm` CLI; the host smoke test passes against Hermes 0.23.1 source (`3b42157`).
 - Manually constructed stock command-dispatch/tool-registry/hook integration passed with network blocked; both auxiliary task slots registered.
 - Real public `plugin_db` smoke test passed with two disposable profile homes and reopening persisted data.
 

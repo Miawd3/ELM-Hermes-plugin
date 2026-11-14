@@ -20,7 +20,7 @@ hermes plugins install "https://github.com/Miawd3/ELM-Hermes-plugin.git#stock-pl
 
 Restart Hermes, then enable **Capabilities → Plugins → ELM**. Use a disposable profile for initial testing and keep your existing memory backup.
 
-**Desktop activation needs an explicit grant for each chat.** Follow the short [installation and permission guide](stock-plugin/README.md#desktop-grant-one-chat-locally). Classic CLI/TUI can use `/elm on`. Do not install the repository root or apply the old host patch.
+**Desktop activation needs an explicit grant for each chat:** run `hermes elm grant` in a terminal and pick the chat. See the [installation and permission guide](stock-plugin/README.md#desktop-grant-one-chat-from-your-terminal). Classic CLI/TUI can use `/elm on`. Do not install the repository root or apply the old host patch.
 
 ## What ELM adds
 
@@ -35,7 +35,7 @@ Restart Hermes, then enable **Capabilities → Plugins → ELM**. Use a disposab
 
 ## What has been checked
 
-**55 Python tests**, JavaScript boundary/presentation checks and the official plugin validator pass. In an unmodified stock Linux Desktop, installation, permission handling, saving/searching a test fact, revocation, settings, the chat shortcut and inline-card preview were checked. Independent code review also covered the permission and source-copy boundaries.
+**132 Python tests** and 4 JavaScript boundary/presentation checks pass (0.2.1; the official plugin validator last ran on 0.2.0). In an unmodified stock Linux Desktop, installation, permission handling, saving/searching a test fact, revocation, settings, the chat shortcut and inline-card preview were checked. Independent code review also covered the permission and source-copy boundaries.
 
 This is a **working candidate, not full acceptance on every platform**. Windows and live-provider workflows still need end-to-end qualification. Agent failure fallback was tested without making paid provider calls. We do not claim the earlier 60% at 700-token benchmark target or demonstrated answer-quality gains.
 

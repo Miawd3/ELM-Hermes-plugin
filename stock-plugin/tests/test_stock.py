@@ -236,7 +236,9 @@ class StockTests(unittest.TestCase):
     def test_registration_only_public_ctx(self):
         register_stock(self.ctx)
         names=[r[0] for r in self.ctx.registrations]
-        self.assertEqual(set(names),{'register_tool','register_hook','register_command','register_skill','register_auxiliary_task'})
+        self.assertEqual(set(names),{'register_tool','register_hook','register_command','register_skill','register_auxiliary_task','register_cli_command'})
+        hooks={r[1][0] for r in self.ctx.registrations if r[0]=='register_hook'}
+        self.assertEqual(hooks,{'pre_llm_call','post_llm_call','post_compaction','on_session_delete'})
         self.assertEqual(names.count('register_skill'),7)
 
 if __name__=='__main__':unittest.main()
