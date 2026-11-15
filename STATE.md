@@ -14,7 +14,21 @@ Short handoff for the next session. Keep this file current instead of adding new
   `0b50a49`: running `hermes plugins update elm` before this branch is pushed would replace 0.2.1 with GitHub `main`.
 - **Branch pushed:** `elm-stock-fixes-20261114`, draft PR https://github.com/Miawd3/ELM-Hermes-plugin/pull/1 (not merged; owner decides).
   Testers install from `main`, so it must be merged to `main` before sending TESTING.md to anyone.
-- **Test profile:** `elmtest` (DeepSeek `deepseek-v4-flash`) exists on the owner's PC for UI spot checks; delete with `hermes profile delete elmtest`.
+- **0.3.0-preview (2026-11-14):** branch `elm-0.3-provider-routing`, draft PR https://github.com/Miawd3/ELM-Hermes-plugin/pull/2
+  stacked on #1. Adds the memory-provider slot (`memory.provider: elm`, `elm_plugin/memory_provider.py`,
+  `serving.py`) and memory-aware routing (`delegation.backend: elm`, `elm_plugin/routing.py`, schema 4).
+  An independent privacy review found 10 defects; all fixed with regression tests (175 tests).
+  Live-verified on `elmtest`: recall indicator, elm_memory in memory-slot mode, routing learns only in
+  granted chats, purge on delete. Remaining low-risk notes: route_task reads the calling chat via
+  `HERMES_SESSION_ID` (os.environ fallback if a context var is unbound); shared Desktop sessions capture
+  every participant's turns (same as hook mode); a locked DB can delay route_task by the busy timeout.
+- **Catalog:** draft entry `catalog/elm.yaml` (passes Hermes's `validate_plugin_catalog.py` with a real sha).
+  To publish: merge #1 and #2 to `main`, tag, put the merge sha in `sha` + `docs_url`, run
+  `hermes plugins validate --install-deps` at that commit, open a PR to NousResearch/hermes-agent adding
+  `plugin-catalog/elm.yaml` (owner's OK required; public).
+- **Test profile:** `elmtest` (DeepSeek `deepseek-v4-flash`, `memory.provider: elm`, `delegation.backend: elm`
+  with agents quick/careful) runs the 0.3 build; the default profile still runs 0.2.1. Delete with
+  `hermes profile delete elmtest`.
 
 ## Architecture (stock plugin)
 
