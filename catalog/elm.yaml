@@ -1,9 +1,7 @@
-# DRAFT entry for NousResearch/hermes-agent plugin-catalog/elm.yaml.
-# Not submitted. Fill `sha` with the merged release commit on main, then open the catalog PR.
 name: elm
 title: ELM
 repo: https://github.com/Miawd3/ELM-Hermes-plugin
-sha: "0000000000000000000000000000000000000000"  # placeholder
+sha: 005f52c0bc3f6c81a6d9554df9cfdb098d8c782c
 subdir: stock-plugin
 version: "0.3.0-preview"
 description: >-
@@ -24,7 +22,7 @@ description: >-
 maintainer: Miawd3
 tier: community
 category: memory
-docs_url: https://github.com/Miawd3/ELM-Hermes-plugin/blob/0000000000000000000000000000000000000000/stock-plugin/README.md
+docs_url: https://github.com/Miawd3/ELM-Hermes-plugin/blob/005f52c0bc3f6c81a6d9554df9cfdb098d8c782c/stock-plugin/README.md
 capabilities:
   provides_tools:
     - elm_memory

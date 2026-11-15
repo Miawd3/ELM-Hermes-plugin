@@ -22,10 +22,16 @@ Short handoff for the next session. Keep this file current instead of adding new
   granted chats, purge on delete. Remaining low-risk notes: route_task reads the calling chat via
   `HERMES_SESSION_ID` (os.environ fallback if a context var is unbound); shared Desktop sessions capture
   every participant's turns (same as hook mode); a locked DB can delay route_task by the busy timeout.
-- **Catalog:** draft entry `catalog/elm.yaml` (passes Hermes's `validate_plugin_catalog.py` with a real sha).
-  To publish: merge #1 and #2 to `main`, tag, put the merge sha in `sha` + `docs_url`, run
-  `hermes plugins validate --install-deps` at that commit, open a PR to NousResearch/hermes-agent adding
-  `plugin-catalog/elm.yaml` (owner's OK required; public).
+- **Released 2026-11-14:** PR #1 and #2 merged to `main` (`005f52c`); tags `v0.2.1-preview` (`99d5f7b`) and
+  `v0.3.0-preview` (`005f52c`). Fresh clone of main: 175 tests + 4 JS checks pass, manifest matches;
+  `hermes plugins validate --install-deps` passes; installing from GitHub at that sha works.
+- **Catalog submitted:** https://github.com/NousResearch/hermes-agent/pull/155965 (one file,
+  `plugin-catalog/elm.yaml`, pinned to `005f52c`; copy in `catalog/elm.yaml`), from the fork
+  `Miawd3/ELM-hermes-agent`, branch `plugin-catalog-add-elm`. Waiting for CI (fork workflows may need a
+  maintainer's approval) and a Nous maintainer's review. Any change to ELM after this needs a new sha in
+  that entry (a new reviewed PR); bump `version` with it.
+- **Default profile** still runs 0.2.1 copied by hand (`.install-metadata.json` says `0b50a49`).
+  Now safe to update: `hermes plugins update elm` (pulls main = 0.3.0-preview). Not done yet.
 - **Test profile:** `elmtest` (DeepSeek `deepseek-v4-flash`, `memory.provider: elm`, `delegation.backend: elm`
   with agents quick/careful) runs the 0.3 build; the default profile still runs 0.2.1. Delete with
   `hermes profile delete elmtest`.
