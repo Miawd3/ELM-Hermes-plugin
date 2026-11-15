@@ -27,6 +27,20 @@ Restart Hermes. In Desktop, open **Capabilities → Plugins** and make sure **EL
 
 Check it: `hermes elm doctor` should print `Storage: ok`.
 
+### Optional: make ELM Hermes's memory provider
+
+Hermes has one slot for an external long-term memory. To put ELM there:
+
+```sh
+hermes memory setup elm        # or: hermes config set memory.provider elm
+```
+
+Restart Hermes. `hermes elm doctor` then says `Memory slot: ELM is the memory provider`, and chats show
+**🧠 ELM — recalled N memories** when a note is added. Everything else (grants, `/elm` commands,
+privacy) works exactly the same; Hermes's own built-in memory keeps working next to it. ELM recalls
+the same way in both modes, never twice. To go back: `hermes config set memory.provider builtin`.
+Only one external memory provider can be active, so this replaces another one (for example Honcho or mem0) if you had it.
+
 ## Turn ELM on for a chat
 
 ELM never turns itself on. You enable it for **one chat at a time**.

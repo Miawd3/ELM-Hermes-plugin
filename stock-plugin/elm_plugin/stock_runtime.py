@@ -108,9 +108,21 @@ def history_text(history):
     return '\n'.join(parts)
 
 
+def provider_selected():
+    """True when this profile runs ELM in Hermes's memory-provider slot (`memory.provider: elm`).
+    Then the provider recalls and captures, and the general hooks below must not do it again."""
+    try:
+        from hermes_cli.config import load_config_readonly
+        memory = load_config_readonly().get('memory') or {}
+        return str(memory.get('provider') or '').strip().lower() == 'elm'
+    except Exception:
+        return False
+
+
 class Runtime:
-    def __init__(self,ctx,store=None):
+    def __init__(self,ctx,store=None,provider_selected=provider_selected):
         self.ctx,self.store = ctx,store or Store()
+        self.provider_selected = provider_selected
         # Record IDs already injected per chat, so automatic recall does not repeat them
         # every turn. Process-local; cleared for a chat when its context is compacted.
         self._injected = OrderedDict()
@@ -284,6 +296,8 @@ class Runtime:
 
     def before_turn(self,*,session_id='',user_message='',conversation_history=None,**kwargs):
         try:
+            if self.provider_selected():
+                return None  # the memory provider recalls instead
             message = plain_text(user_message)
             if trivial(message):
                 return None
@@ -318,6 +332,8 @@ class Runtime:
 
     def after_turn(self,*,session_id='',user_message='',assistant_response='',**kwargs):
         try:
+            if self.provider_selected():
+                return None  # the memory provider's sync_turn captures instead
             self.store.capture_turn(self.sid(session_id),plain_text(user_message),plain_text(assistant_response))
         except Exception:
             return None

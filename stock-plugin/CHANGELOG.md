@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0-preview — unreleased
+
+- **New:** ELM can run in Hermes's memory-provider slot (`memory.provider: elm`, or `hermes memory setup elm`).
+  Recall then goes through Hermes's memory prefetch, with the **🧠 ELM — recalled N memories** indicator,
+  capture through `sync_turn`, and compression through `on_session_switch`. Same grant rules as before;
+  subagents, cron and messaging chats never recall. The general hooks step aside in this mode, so a note
+  is never injected twice. Without the setting, ELM works exactly as in 0.2.1.
+- `hermes elm doctor` shows whether ELM is in the memory slot.
+
 ## 0.2.1-preview — 2026-11-14
 
 - **Fix:** long chats kept their ELM access and private notes when Hermes compression moves them to a new session ID (`post_compaction`).

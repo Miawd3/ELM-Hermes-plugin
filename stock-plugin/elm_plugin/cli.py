@@ -113,6 +113,9 @@ def doctor(store):
     from hermes_constants import display_hermes_home
     print(f'ELM {plugin_version()} on Hermes {hermes_version()} ({platform.system()} {platform.release()}, Python {platform.python_version()})')
     print(f'Profile: {display_hermes_home()}')
+    from .stock_runtime import provider_selected
+    print('Memory slot: ELM is the memory provider (memory.provider: elm)' if provider_selected()
+          else 'Memory slot: not selected; recall runs through plugin hooks (hermes memory setup elm to switch)')
     try:
         health = store.health()
     except Exception as exc:
