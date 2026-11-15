@@ -1,3 +1,4 @@
+import gc
 import json
 import sqlite3
 import tempfile
@@ -17,7 +18,10 @@ class RecallFinalizationTests(unittest.TestCase):
         self.store.settings(self.sid,{'enabled':True})
         self.record=self.store.insert(self.sid,'reference','door red',approved=True)['id']
         self.rt=Runtime(SimpleNamespace(session_surface=lambda:'cli'),self.store)
-    def tearDown(self): self.tmp.cleanup()
+    def tearDown(self):
+        # Windows cannot delete an open SQLite file; collect connections that tests
+        # opened inline (e.g. store.open().execute(...)) before removing the folder.
+        gc.collect(); self.tmp.cleanup()
     def mutate_after_read(self,fn):
         original=self.store.records
         def records(*a,**kw):

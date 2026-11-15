@@ -1,3 +1,4 @@
+import gc
 import json
 import shlex
 import sqlite3
@@ -14,7 +15,10 @@ class ManagerTests(unittest.TestCase):
         self.store=Store(lambda:sqlite3.connect(self.path))
         self.runtime=Runtime(SimpleNamespace(),self.store)
         self.sid=session_key('a','cli')
-    def tearDown(self): self.tmp.cleanup()
+    def tearDown(self):
+        # Windows cannot delete an open SQLite file; collect connections that tests
+        # opened inline (e.g. store.open().execute(...)) before removing the folder.
+        gc.collect(); self.tmp.cleanup()
     def request(self,data,sid='a',platform='local'):
         return json.loads(self.runtime.command('manager '+shlex.quote(json.dumps(data)),session_id=sid,platform=platform))
     def listing(self,status='approved',offset=0,sid='a'):
