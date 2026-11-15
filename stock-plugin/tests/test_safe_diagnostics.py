@@ -1,4 +1,5 @@
 """No pre-grant diagnostic may open a DB or reveal stored/profile data."""
+from contextlib import closing
 import hashlib
 import json
 import sqlite3
@@ -42,7 +43,7 @@ class SafeDiagnosticsTests(unittest.TestCase):
             for state in ('valid','expired','revoked','wrong_profile','malformed'):
                 store.grant_local('secret_session',project='hidden-project',user=True,capture=True)
                 if state=='expired':
-                    with store.open() as db: db.execute('UPDATE stock_local_grants SET expires=0')
+                    with closing(store.open()) as db, db: db.execute('UPDATE stock_local_grants SET expires=0')
                 elif state=='revoked':
                     store.settings(store.require_local_grant('secret_session'),{'enabled':False})
                 elif state=='wrong_profile':

@@ -57,8 +57,8 @@ function parseStatus(reply) {
 }
 function accessPresentation(code) {
   if (code === 'exact_session_cli_grant_required') return {kind:'locked', title:'Memory needs permission for this chat', text:'This chat has no active grant. It may be new, expired or revoked. Saved memories have not been deleted.'}
-  if (code === 'local_grant_expired_or_changed') return {kind:'locked', title:'Memory permission changed or expired', text:'Renew the exact-chat grant from the correct Hermes profile, then refresh.'}
-  if (code === 'enable_this_chat_with_slash_elm_on' || code === 'off') return {kind:'locked', title:'Memory is off for this chat', text:'Saved data is kept. Unified Desktop chats need the local grant command to enable access again.'}
+  if (code === 'local_grant_expired_or_changed') return {kind:'locked', title:'Memory permission changed or expired', text:'Renew it with hermes elm grant in a terminal, then refresh.'}
+  if (code === 'enable_this_chat_with_slash_elm_on' || code === 'off') return {kind:'locked', title:'Memory is off for this chat', text:'Saved data is kept. Run hermes elm grant in a terminal to turn it on again.'}
   if (code === 'local_session_required') return {kind:'unsupported', title:'This session type is not supported', text:'ELM currently supports explicitly enrolled local chats. Memory access is not enabled for this session.'}
   return {kind:'unavailable', title:'Memory settings unavailable', text:'Check the Hermes connection and refresh. This is not a confirmed permission problem.'}
 }
@@ -90,6 +90,8 @@ const inputStyle = { ...buttonStyle, background: 'var(--ui-bg)', color: 'var(--u
 
 function Settings() {
   const sid = useValue(host.state.focusedSessionId)
+  // Hooks and slash commands see the stored (agent) session ID, not the runtime handle.
+  const storedSid = useValue(host.state.focusedStoredSessionId)
   const owner = useValue(host.state.focusedSessionOwner)
   const connectionId = useValue(host.state.connectionId)
   const gatewayState = useValue(host.state.gateway)
@@ -156,7 +158,7 @@ function Settings() {
     h(VisualSettings),
     h('p', null, valid ? 'Settings apply to the focused local chat, not every chat.' : 'Focus a saved local chat on the active connection to configure ELM.'),
     sameIdentity(stateOwner, identity) && error && h('p', { role: 'status' }, error),
-    visibleAccess && h(AccessSetup, { access: visibleAccess, sid, profile }),
+    visibleAccess && h(AccessSetup, { access: visibleAccess, sid: storedSid, profile }),
     visibleState?.permissions_via_cli && h('p', { style: { fontSize: 12, opacity: .75 } }, 'Permissions are set with the local grant command for this exact chat. Any authenticated client of this chat shares access. You can turn memory off here.'),
     valid && h('button', { style: buttonStyle, disabled: busy, onClick: () => run() }, busy ? 'Loading…' : 'Refresh'),
     visibleState?.enabled === 1 && h(MemoryManager,{key:[sid,profile,connectionId,epoch,visibleState.revision].join('|'),identity,current}),
@@ -237,17 +239,23 @@ function MemoryManager({identity, current}) {
   )
 }
 
+function grantCommand(profile, sid) {
+  // Only plain names/IDs are pasted into a shell line; anything else shows a placeholder.
+  const safe = value => typeof value === 'string' && /^[A-Za-z0-9._:-]{1,200}$/.test(value)
+  const prefix = safe(profile) && profile !== 'default' ? 'hermes -p ' + profile : 'hermes'
+  return prefix + ' elm grant ' + (safe(sid) ? sid : '<chat-id from: hermes elm sessions>')
+}
+
 function AccessSetup({access, sid, profile}) {
   const locked = access.kind === 'locked'
   return h('div', {style:{display:'grid',gap:12,border:'1px solid var(--ui-border)',borderRadius:8,padding:16}},
     h('div', {role:'status'}, h('strong',null,access.title), h('p',null,access.text)),
     locked && h('div',null,
-      h('p',null,'1. Open a terminal using this chat’s actual Hermes profile and Hermes Python environment.'),
-      h('p',null,'2. Follow the setup guide: verify --show-home, then grant this exact session with --expect-home. Do not use the parent directory of a named profile.'),
+      h('p',null,'1. Open a terminal on this computer and run:'),
+      h('pre',{style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere',userSelect:'text',margin:0}},h('code',null,grantCommand(profile,sid))),
+      h('p',null,'2. Confirm with y. Add --project NAME or --user to share memory with other chats; omit them to keep memory in this chat only.'),
       h('p',null,'3. Return here and select Refresh.'),
-      h('p',null,'Selected profile label: ',h('code',null,typeof profile === 'string' ? profile : '(not available)')),
-      h('p',null,'Focused runtime session ID: ',h('code',{style:{overflowWrap:'anywhere'}},sid)),
-      h('small',null,'Verify the full ID with Hermes sessions list. A profile label is not a filesystem path. Grants expire after 24 hours by default; authenticated clients of this same session share access.'),
+      h('small',null,'Profile: '+(typeof profile === 'string' ? profile : '(not available)')+'. Grants expire after 24 hours by default; authenticated clients of this same session share access. Revoke anytime with hermes elm revoke.'),
       h('p',null,h('a',{href:'https://github.com/Miawd3/ELM-Hermes-plugin/blob/main/stock-plugin/README.md',target:'_blank',rel:'noopener noreferrer'},'Open setup guide'))),
     locked && h('fieldset',{disabled:true,style:{display:'grid',gap:6,border:'1px solid var(--ui-border)',padding:12}},
       h('legend',null,'Memory controls · locked until access is granted'),

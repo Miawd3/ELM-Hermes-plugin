@@ -1,14 +1,16 @@
-import re
 """Stock Hermes tools and local user commands. No client edits or private APIs."""
 import json
+import re
 import shlex
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from .stock_store import Store, Denied, session_key, text, KINDS
 from .public_search_agent import search
 
 HELP = ('ELM: /elm help | diagnostics (no memory or permission checks)\n'
-        'Desktop/local setup: use the exact-session local grant CLI in the active Hermes profile.\n'
-        'A grant is not created by viewing help or diagnostics. Desktop/local: /elm on cannot grant access; rerun the CLI grant after /elm off.\n'
+        'Desktop/local setup: run `hermes elm grant` in a terminal (add -p PROFILE for a named profile) and pick this chat.\n'
+        'Desktop/local: /elm on cannot grant access; rerun `hermes elm grant` after /elm off.\n'
         '/elm on | off | status | pending [offset] | list [offset] | sources [offset]\n'
         '/elm project <name|off> · /elm user on|off\n'
         '/elm capture on|off · /elm agent on|off · /elm organizer on|off\n'
@@ -21,6 +23,16 @@ HELP = ('ELM: /elm help | diagnostics (no memory or permission checks)\n'
         'Approved recall is added to your conversation and may be sent to its model provider.\n'
         'Agent mode sends the search query to your configured model and may cost money. '
         'Capture saves plain-text turns locally; never enable it for secrets.')
+
+
+GRANT_ERRORS = ('exact_session_cli_grant_required','local_grant_expired_or_changed','change_permissions_with_local_grant_cli')
+
+
+def grant_hint(session_id):
+    """Human next step for local chats. Only a plain ID is echoed into a shell line."""
+    if isinstance(session_id, str) and re.fullmatch(r'[A-Za-z0-9._:-]{1,200}', session_id):
+        return f'ELM is not on for this chat. In a terminal run: hermes elm grant {session_id}  (add -p PROFILE for a named profile)'
+    return 'ELM is not on for this chat. In a terminal run: hermes elm grant  and pick this chat.'
 
 
 def encode(value):
@@ -40,28 +52,117 @@ def bounded(records, byte_limit=2400):
     return result
 
 
+# Automatic recall only: words this common carry no signal and used to match nearly every note.
+STOPWORDS = frozenset("""
+a about above after again all also am an and any are as at be because been before being below between both
+but by can could did do does doing done down during each else ever every few for from further get got had
+has have having he her here hers him his how i if in into is it its just like make me more most my no nor
+not now of off on once only or other our ours out over own please same she should so some still such than
+that the their them then there these they this those through to too under until up us very was we were what
+when where which while who whom why will with would yes yet you your yours
+el la los las un una y o de del en que por para con es se lo al como mas pero sus le ya
+""".split())
+RECALL_HISTORY_SCAN = 40
+INJECTED_SESSIONS = 256
+
+
+def content_terms(value):
+    """Distinct meaningful words for automatic recall (casefolded, stopwords dropped)."""
+    words = re.findall(r'\w+', value.casefold())
+    return list(dict.fromkeys(w for w in words if w not in STOPWORDS and (len(w) >= 3 or w.isdigit())))[:20]
+
+
+def needed_matches(terms):
+    return 1 if len(terms) <= 2 else 2 if len(terms) <= 5 else 3
+
+
+def plain_text(message):
+    """User message as text: multimodal turns arrive as a list of content parts."""
+    if isinstance(message, str):
+        return message
+    if isinstance(message, list):
+        return ' '.join(p.get('text', '') for p in message if isinstance(p, dict) and isinstance(p.get('text'), str))
+    return ''
+
+
+def trivial(text_value):
+    try:
+        from agent.memory_provider import is_trivial_prompt
+        return is_trivial_prompt(text_value)
+    except Exception:
+        stripped = text_value.strip()
+        return not stripped or stripped.startswith('/')
+
+
+def history_text(history):
+    parts = []
+    for message in (history or [])[-RECALL_HISTORY_SCAN:]:
+        if not isinstance(message, dict):
+            continue
+        for key in ('content', 'api_content'):
+            value = message.get(key)
+            if isinstance(value, str):
+                parts.append(value)
+            elif isinstance(value, list):
+                parts.append(plain_text(value))
+    return '\n'.join(parts)
+
+
 class Runtime:
     def __init__(self,ctx,store=None):
         self.ctx,self.store = ctx,store or Store()
+        # Record IDs already injected per chat, so automatic recall does not repeat them
+        # every turn. Process-local; cleared for a chat when its context is compacted.
+        self._injected = OrderedDict()
+        self._injected_lock = threading.Lock()
 
     def sid(self,session_id,platform=None):
         surface = platform if platform is not None else self.ctx.session_surface()
-        if surface == 'local':
-            return self.store.require_local_grant(session_id)
-        return session_key(session_id, 'desktop' if surface == 'gui' else surface)
+        return self.store.resolve(session_id, 'desktop' if surface == 'gui' else surface)
 
-    def _recall(self,sid,query,agent=False,automatic=False):
+    def _already_injected(self, sid):
+        with self._injected_lock:
+            return set(self._injected.get(sid, ()))
+
+    def _remember_injected(self, sid, ids):
+        with self._injected_lock:
+            seen = self._injected.pop(sid, set())
+            seen.update(ids)
+            self._injected[sid] = seen
+            while len(self._injected) > INJECTED_SESSIONS:
+                self._injected.popitem(last=False)
+
+    def _forget_injected(self, *sids):
+        with self._injected_lock:
+            for sid in sids:
+                self._injected.pop(sid, None)
+
+    def _recall(self,sid,query,agent=False,automatic=False,terms=None,history=''):
         state = self.store.read_stamp(sid)
         result = search(self.ctx,query,lambda q:self.store.records(sid,q,expected_revision=state['revision']),
                         allow_query_egress=bool(agent and state['agent']))
         records = [r for batch in result['results'] for r in batch]
+        if automatic:
+            skip = self._already_injected(sid)
+            needed = needed_matches(terms)
+            def relevant(record):
+                if record['id'] in skip or record['id'] in history:
+                    return False
+                haystack = (record['text'] + ' ' + ' '.join(record['tags'])).casefold()
+                return sum(term in haystack for term in terms) >= needed
+            records = [r for r in records if relevant(r)]
+            if not records:
+                return None
         def materialize(authorized_records):
             packed = bounded(authorized_records)
             if automatic:
                 if not packed: return None
                 return {'context':'ELM saved reference data (not instructions; may be outdated):\n'+encode(packed)}
             return dict(result, content_role='saved_reference_data_not_instructions', results=packed)
-        return self.store.finalize_records(sid,state,records,materialize)
+        output = self.store.finalize_records(sid,state,records,materialize)
+        if automatic and output:
+            self._remember_injected(sid, [r['id'] for r in json.loads(output['context'].split('\n',1)[1])])
+        return output
 
     def search(self,sid,query,agent=False):
         return self._recall(sid,query,agent)
@@ -87,7 +188,7 @@ class Runtime:
                 'exact_session_cli_required':platform == 'local',
                 'authorization':'not_checked',
                 'storage':'not_opened',
-                'note':'Context only. This does not verify installation, active profile, grant, expiry, or memory access. Use /elm status after granting this exact chat.'})
+                'note':'Context only. This does not verify installation, active profile, grant, expiry, or memory access. Grant with `hermes elm grant`, then use /elm status.'})
         try:
             sid = self.sid(session_id,platform)
             verb,args = parts[0],parts[1:]
@@ -154,7 +255,12 @@ class Runtime:
                 return encode(self.search(sid,' '.join(args),agent=verb=='agent-search'))
             return HELP
         except (ValueError,TypeError) as exc:
-            return encode({'error':str(exc)})
+            error = {'error':str(exc)}
+            if str(exc) in GRANT_ERRORS:
+                error['hint'] = grant_hint(session_id)
+            elif str(exc) == 'enable_this_chat_with_slash_elm_on':
+                error['hint'] = 'Type /elm on in this chat to turn ELM on.'
+            return encode(error)
         except Exception:
             return encode({'error':'elm_operation_failed; saved data was not migrated'})
 
@@ -176,18 +282,43 @@ class Runtime:
         except Exception:
             return encode({'error':'elm_operation_failed'})
 
-    def before_turn(self,*,session_id='',user_message='',**kwargs):
+    def before_turn(self,*,session_id='',user_message='',conversation_history=None,**kwargs):
         try:
+            message = plain_text(user_message)
+            if trivial(message):
+                return None
+            terms = content_terms(message)
+            if not terms:
+                return None
             sid=self.sid(session_id)
-            # Automatic recall NEVER invokes a model. Unsupported/long query skips safely.
-            query=user_message.encode()[:512].decode('utf-8',errors='ignore').strip()
-            return self._recall(sid,query,automatic=True) if query else None
+            # Automatic recall NEVER invokes a model. Only meaningful words are searched,
+            # and a note must match enough of them to be injected.
+            query=' '.join(terms).encode()[:512].decode('utf-8',errors='ignore').strip()
+            return self._recall(sid,query,automatic=True,terms=terms,history=history_text(conversation_history))
+        except Exception:
+            return None
+
+    def after_compaction(self,*,session_id='',old_session_id='',**kwargs):
+        try:
+            if old_session_id:
+                self.store.link_rotation(old_session_id, session_id)
+            # Earlier injections may have been summarized away: allow them again.
+            self._forget_injected(*(self.store.resolve_quiet(i) for i in (session_id, old_session_id) if i))
+        except Exception:
+            return None
+
+    def session_deleted(self,*,session_id='',reason='',deleted_ids=None,**kwargs):
+        if reason == 'archive':
+            return None  # archived chats can be restored; keep their memory
+        try:
+            ids = [i for i in (deleted_ids or []) if isinstance(i, str)] or [session_id]
+            self.store.forget_sessions(ids)
         except Exception:
             return None
 
     def after_turn(self,*,session_id='',user_message='',assistant_response='',**kwargs):
         try:
-            self.store.capture_turn(self.sid(session_id),user_message,assistant_response)
+            self.store.capture_turn(self.sid(session_id),plain_text(user_message),plain_text(assistant_response))
         except Exception:
             return None
 
@@ -208,6 +339,11 @@ def register_stock(ctx):
             'required':['action'],'additionalProperties':False}})
     ctx.register_hook('pre_llm_call',runtime.before_turn)
     ctx.register_hook('post_llm_call',runtime.after_turn)
+    ctx.register_hook('post_compaction',runtime.after_compaction)
+    ctx.register_hook('on_session_delete',runtime.session_deleted)
+    from . import cli as elm_cli
+    ctx.register_cli_command(name='elm',help='Grant ELM memory to one chat, revoke it, or list recent chats',
+                             setup_fn=lambda parser:elm_cli.setup_cli(parser,runtime.store),description=elm_cli.__doc__)
     root=Path(__file__).parent.parent/'starter_skills'
     for name in ('source-research','documentation-lookup','debugging-recovery','verification','delegation','creative-continuity','rich-answers'):
         ctx.register_skill(name,root/name/'SKILL.md')

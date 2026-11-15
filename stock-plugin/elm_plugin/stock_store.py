@@ -29,6 +29,41 @@ def session_key(session_id, surface):
     return hashlib.sha256(session_id.encode()).hexdigest()
 
 
+SCHEMA_VERSION = 2
+_SCHEMA = (
+    """CREATE TABLE IF NOT EXISTS stock_local_grants (
+      session TEXT PRIMARY KEY, expires REAL NOT NULL, revision INTEGER NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS stock_sessions (
+      session TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0,
+      project TEXT, user_scope INTEGER NOT NULL DEFAULT 0,
+      capture INTEGER NOT NULL DEFAULT 0, agent INTEGER NOT NULL DEFAULT 0,
+      organizer INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0)""",
+    """CREATE TABLE IF NOT EXISTS stock_records (
+      id TEXT PRIMARY KEY, scope TEXT NOT NULL, kind TEXT NOT NULL,
+      content TEXT NOT NULL, tags TEXT NOT NULL, status TEXT NOT NULL,
+      source_session TEXT NOT NULL, source_id TEXT, created REAL NOT NULL,
+      updated REAL NOT NULL, search_text TEXT NOT NULL DEFAULT '')""",
+    "CREATE INDEX IF NOT EXISTS stock_records_scope ON stock_records(scope,status)",
+    """CREATE TABLE IF NOT EXISTS stock_skill_sources (
+      draft_id TEXT NOT NULL, source_record_id TEXT NOT NULL, source_updated REAL NOT NULL, excerpt TEXT NOT NULL,
+      PRIMARY KEY(draft_id,source_record_id))""",
+    """CREATE TABLE IF NOT EXISTS stock_sources (
+      id TEXT PRIMARY KEY, session TEXT NOT NULL, user_text TEXT NOT NULL,
+      assistant_text TEXT NOT NULL, created REAL NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS stock_read_epoch (
+      singleton INTEGER PRIMARY KEY CHECK(singleton=1), identity TEXT NOT NULL, generation INTEGER NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS stock_session_alias (
+      session TEXT PRIMARY KEY, root TEXT NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS stock_session_alias_root ON stock_session_alias(root)",
+)
+
+
+def _hash(session_id):
+    if not isinstance(session_id, str) or not session_id or len(session_id) > 512:
+        return None
+    return hashlib.sha256(session_id.encode()).hexdigest()
+
+
 def default_connection():
     from plugins.plugin_storage import plugin_db
     return plugin_db('elm', 'stock-v1.sqlite3')
@@ -41,44 +76,129 @@ class Store:
 
     def open(self):
         db = self.connection()
-        db.executescript('''
-        CREATE TABLE IF NOT EXISTS stock_local_grants (
-          session TEXT PRIMARY KEY, expires REAL NOT NULL, revision INTEGER NOT NULL);
-        CREATE TABLE IF NOT EXISTS stock_sessions (
-          session TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0,
-          project TEXT, user_scope INTEGER NOT NULL DEFAULT 0,
-          capture INTEGER NOT NULL DEFAULT 0, agent INTEGER NOT NULL DEFAULT 0,
-          organizer INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0);
-        CREATE TABLE IF NOT EXISTS stock_records (
-          id TEXT PRIMARY KEY, scope TEXT NOT NULL, kind TEXT NOT NULL,
-          content TEXT NOT NULL, tags TEXT NOT NULL, status TEXT NOT NULL,
-          source_session TEXT NOT NULL, source_id TEXT, created REAL NOT NULL,
-          updated REAL NOT NULL, search_text TEXT NOT NULL DEFAULT '');
-        CREATE INDEX IF NOT EXISTS stock_records_scope ON stock_records(scope,status);
-        CREATE TABLE IF NOT EXISTS stock_skill_sources (
-          draft_id TEXT NOT NULL, source_record_id TEXT NOT NULL, source_updated REAL NOT NULL, excerpt TEXT NOT NULL,
-          PRIMARY KEY(draft_id,source_record_id));
-        CREATE TABLE IF NOT EXISTS stock_sources (
-          id TEXT PRIMARY KEY, session TEXT NOT NULL, user_text TEXT NOT NULL,
-          assistant_text TEXT NOT NULL, created REAL NOT NULL);
-        ''')
-        # Additive migration of OUR stock schema only; never reads legacy patched stores.
-        if 'organizer' not in {r[1] for r in db.execute('PRAGMA table_info(stock_sessions)')}:
-            db.execute('ALTER TABLE stock_sessions ADD COLUMN organizer INTEGER NOT NULL DEFAULT 0')
-        if 'revision' not in {r[1] for r in db.execute('PRAGMA table_info(stock_sessions)')}:
-            db.execute('ALTER TABLE stock_sessions ADD COLUMN revision INTEGER NOT NULL DEFAULT 0')
-        if 'search_text' not in {r[1] for r in db.execute('PRAGMA table_info(stock_records)')}:
-            db.execute("ALTER TABLE stock_records ADD COLUMN search_text TEXT NOT NULL DEFAULT ''")
-            for rid,content,tags in db.execute('SELECT id,content,tags FROM stock_records').fetchall():
-                db.execute('UPDATE stock_records SET search_text=? WHERE id=?',((content+' '+tags).casefold(),rid))
-        # Persistent identity and monotonic content generation fence in-flight reads.
-        db.execute("CREATE TABLE IF NOT EXISTS stock_read_epoch (singleton INTEGER PRIMARY KEY CHECK(singleton=1), identity TEXT NOT NULL, generation INTEGER NOT NULL)")
-        db.execute("INSERT OR IGNORE INTO stock_read_epoch VALUES(1,?,0)",(uuid.uuid4().hex,))
-        for event in ('INSERT','UPDATE','DELETE'):
-            db.execute("CREATE TRIGGER IF NOT EXISTS stock_record_epoch_"+event.lower()+
-                       " AFTER "+event+" ON stock_records BEGIN UPDATE stock_read_epoch SET generation=generation+1 WHERE singleton=1; END")
-        db.commit()
+        try:
+            # Schema setup runs once per database file. Re-running DDL plus the epoch
+            # INSERT on every open took a write lock on each read (4-6 times per turn).
+            if db.execute('PRAGMA user_version').fetchone()[0] < SCHEMA_VERSION:
+                self._migrate(db)
+        except BaseException:
+            db.close()
+            raise
         return db
+
+    @staticmethod
+    def _migrate(db):
+        db.execute('BEGIN IMMEDIATE')
+        try:
+            if db.execute('PRAGMA user_version').fetchone()[0] >= SCHEMA_VERSION:
+                db.rollback()
+                return
+            for statement in _SCHEMA:
+                db.execute(statement)
+            # Additive migration of OUR stock schema only; never reads legacy patched stores.
+            if 'organizer' not in {r[1] for r in db.execute('PRAGMA table_info(stock_sessions)')}:
+                db.execute('ALTER TABLE stock_sessions ADD COLUMN organizer INTEGER NOT NULL DEFAULT 0')
+            if 'revision' not in {r[1] for r in db.execute('PRAGMA table_info(stock_sessions)')}:
+                db.execute('ALTER TABLE stock_sessions ADD COLUMN revision INTEGER NOT NULL DEFAULT 0')
+            if 'search_text' not in {r[1] for r in db.execute('PRAGMA table_info(stock_records)')}:
+                db.execute("ALTER TABLE stock_records ADD COLUMN search_text TEXT NOT NULL DEFAULT ''")
+                for rid,content,tags in db.execute('SELECT id,content,tags FROM stock_records').fetchall():
+                    db.execute('UPDATE stock_records SET search_text=? WHERE id=?',((content+' '+tags).casefold(),rid))
+            # Persistent identity and monotonic content generation fence in-flight reads.
+            db.execute("INSERT OR IGNORE INTO stock_read_epoch VALUES(1,?,0)",(uuid.uuid4().hex,))
+            for event in ('INSERT','UPDATE','DELETE'):
+                db.execute("CREATE TRIGGER IF NOT EXISTS stock_record_epoch_"+event.lower()+
+                           " AFTER "+event+" ON stock_records BEGIN UPDATE stock_read_epoch SET generation=generation+1 WHERE singleton=1; END")
+            db.execute('PRAGMA user_version=%d' % SCHEMA_VERSION)
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+
+    @staticmethod
+    def root(db, sid):
+        """Hermes can rotate a chat to a new session ID on compression; ELM state stays on the first ID."""
+        row = db.execute('SELECT root FROM stock_session_alias WHERE session=?', (sid,)).fetchone()
+        return row[0] if row else sid
+
+    def resolve(self, session_id, surface):
+        """Hashed, alias-resolved chat key. Local (unified Desktop) chats also need a live grant."""
+        if surface == 'local':
+            return self.require_local_grant(session_id)
+        sid = session_key(session_id, surface)
+        with closing(self.open()) as db:
+            return self.root(db, sid)
+
+    def health(self):
+        """Counts only (never content or IDs), for `hermes elm doctor` and bug reports."""
+        now = time.time()
+        with closing(self.open()) as db:
+            count = lambda sql, *a: db.execute(sql, a).fetchone()[0]
+            records = dict(db.execute('SELECT status, COUNT(*) FROM stock_records GROUP BY status').fetchall())
+            return {
+                'schema_version': count('PRAGMA user_version'),
+                'chats_with_elm_state': count('SELECT COUNT(*) FROM stock_sessions'),
+                'chats_enabled': count('SELECT COUNT(*) FROM stock_sessions WHERE enabled=1'),
+                'active_local_grants': count('SELECT COUNT(*) FROM stock_local_grants WHERE expires>?', now),
+                'expired_local_grants': count('SELECT COUNT(*) FROM stock_local_grants WHERE expires<=?', now),
+                'records': {k: records.get(k, 0) for k in ('approved', 'pending', 'trash')},
+                'captured_sources': count('SELECT COUNT(*) FROM stock_sources'),
+                'compaction_links': count('SELECT COUNT(*) FROM stock_session_alias'),
+                'integrity': db.execute('PRAGMA quick_check').fetchone()[0],
+            }
+
+    def resolve_quiet(self, session_id):
+        """Alias-resolved key with no permission check; for process-local cache bookkeeping only."""
+        sid = _hash(session_id)
+        if sid is None:
+            return None
+        with closing(self.open()) as db:
+            return self.root(db, sid)
+
+    def link_rotation(self, old_session_id, new_session_id):
+        """Carry one chat's ELM grant, settings and chat-only memory across a compaction rotation."""
+        old, new = _hash(old_session_id), _hash(new_session_id)
+        if old is None or new is None or old == new:
+            return None
+        with closing(self.open()) as db, db:
+            db.execute('BEGIN IMMEDIATE')
+            root = self.root(db, old)
+            if root == new:
+                return None
+            if not db.execute('SELECT 1 FROM stock_sessions WHERE session=?', (root,)).fetchone():
+                return None  # this chat never used ELM; keep no metadata for it
+            db.execute('INSERT OR REPLACE INTO stock_session_alias VALUES(?,?)', (new, root))
+            return root
+
+    def forget_sessions(self, session_ids):
+        """Purge chat-only memory, captured sources, settings and grants of deleted chats.
+
+        Project and shared user records survive. A chat is purged only when its first
+        session ID is deleted and no later (rotated) ID of it remains.
+        """
+        deleted = {h for h in (_hash(i) for i in session_ids) if h}
+        if not deleted:
+            return []
+        purged = []
+        with closing(self.open()) as db, db:
+            db.execute('BEGIN IMMEDIATE')
+            roots = {self.root(db, sid) for sid in deleted} | deleted
+            db.executemany('DELETE FROM stock_session_alias WHERE session=?', [(sid,) for sid in deleted])
+            for root in sorted(roots):
+                if root not in deleted:
+                    continue
+                if db.execute('SELECT 1 FROM stock_session_alias WHERE root=? LIMIT 1', (root,)).fetchone():
+                    continue
+                scope = 'chat:' + root
+                drafts = [r[0] for r in db.execute('SELECT id FROM stock_records WHERE scope=?', (scope,))]
+                db.executemany('DELETE FROM stock_skill_sources WHERE draft_id=?', [(d,) for d in drafts])
+                records = db.execute('DELETE FROM stock_records WHERE scope=?', (scope,)).rowcount
+                sources = db.execute('DELETE FROM stock_sources WHERE session=?', (root,)).rowcount
+                settings = db.execute('DELETE FROM stock_sessions WHERE session=?', (root,)).rowcount
+                db.execute('DELETE FROM stock_local_grants WHERE session=?', (root,))
+                if records or sources or settings:
+                    purged.append({'records': records, 'sources': sources})
+        return purged
 
     @staticmethod
     def state(db, sid, require=True):
@@ -160,6 +280,7 @@ class Store:
         if any(type(v) is not bool for v in (user,capture,agent,organizer)): raise ValueError('invalid_setting')
         with closing(self.open()) as db, db:
             db.execute('BEGIN IMMEDIATE')
+            sid=self.root(db,sid)
             db.execute('INSERT OR IGNORE INTO stock_sessions(session) VALUES(?)',(sid,))
             db.execute('UPDATE stock_sessions SET enabled=1,project=?,user_scope=?,capture=?,agent=?,organizer=?,revision=revision+1 WHERE session=?',
                        (project,user,capture,agent,organizer,sid))
@@ -168,10 +289,17 @@ class Store:
             db.execute('INSERT OR REPLACE INTO stock_local_grants VALUES(?,?,?)',(sid,expires,revision))
             return {'expires':expires,'settings':self.state(db,sid,False)}
 
+    def revoke_local(self, session_id):
+        sid=session_key(session_id,'cli')
+        with closing(self.open()) as db:
+            sid=self.root(db,sid)
+        return self.settings(sid,{'enabled':False})
+
     def require_local_grant(self, session_id):
         sid=session_key(session_id,'cli')
         with closing(self.open()) as db:
             db.execute('BEGIN')
+            sid=self.root(db,sid)
             if not db.execute('SELECT 1 FROM stock_local_grants WHERE session=?',(sid,)).fetchone():
                 raise Denied('exact_session_cli_grant_required')
             self.state(db,sid)

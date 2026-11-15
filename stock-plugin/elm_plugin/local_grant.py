@@ -1,8 +1,8 @@
-"""Explicit local operator bridge for stock unified sessions; never a model tool."""
+"""Legacy explicit local operator bridge; prefer `hermes elm grant`. Never a model tool."""
 import argparse
 import json
 from pathlib import Path
-from .stock_store import Store, session_key
+from .stock_store import Store
 
 
 def main(argv=None, store=None):
@@ -35,7 +35,7 @@ def main(argv=None, store=None):
     if args.session.strip()!=args.session or any(c in args.session for c in '*?\x00\n\r'): parser.error('use one exact session ID')
     store=Store() if store is None else store
     if args.revoke:
-        result=store.settings(session_key(args.session,'cli'),{'enabled':False})
+        result=store.revoke_local(args.session)
     else:
         if not args.allow_session_clients: parser.error('--allow-session-clients is required; read the trust warning in --help')
         result=store.grant_local(args.session,hours=args.hours,project=args.project,user=args.user,capture=args.capture,agent=args.agent,organizer=args.organizer)

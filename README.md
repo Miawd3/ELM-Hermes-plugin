@@ -18,9 +18,9 @@ Or use the Hermes terminal:
 hermes plugins install "https://github.com/Miawd3/ELM-Hermes-plugin.git#stock-plugin" --enable
 ```
 
-Restart Hermes, then enable **Capabilities → Plugins → ELM**. Use a disposable profile for initial testing and keep your existing memory backup.
+Restart Hermes, then enable **Capabilities → Plugins → ELM**. Requires Hermes 0.23.1 or newer. **Testing it?** Follow the [tester guide](stock-plugin/TESTING.md) (about 20 minutes, uses a separate test profile).
 
-**Desktop activation needs an explicit grant for each chat.** Follow the short [installation and permission guide](stock-plugin/README.md#desktop-grant-one-chat-locally). Classic CLI/TUI can use `/elm on`. Do not install the repository root or apply the old host patch.
+**Desktop activation needs an explicit grant for each chat:** run `hermes elm grant` in a terminal and pick the chat. See the [installation and permission guide](stock-plugin/README.md#desktop-grant-one-chat-from-your-terminal). Classic CLI/TUI can use `/elm on`. Do not install the repository root or apply the old host patch.
 
 ## What ELM adds
 
@@ -31,11 +31,11 @@ Restart Hermes, then enable **Capabilities → Plugins → ELM**. Use a disposab
 - **Clearer presentation:** optional inline Progress, Update, Answer, Final and Question cards, two styles, and a focused-chat settings shortcut. Labels are model-provided, not proof that work succeeded.
 - **Local control:** opt-in plaintext capture, expiring per-chat grants, and model calls off by default.
 
-[Complete usage, privacy and capability guide →](stock-plugin/README.md) · [Source and tests →](stock-plugin/) · [Verification evidence →](stock-plugin/evidence/)
+[Usage and privacy guide →](stock-plugin/README.md) · [Tester guide →](stock-plugin/TESTING.md) · [Changelog →](stock-plugin/CHANGELOG.md) · [Detailed notes →](stock-plugin/docs/DETAILS.md)
 
 ## What has been checked
 
-**55 Python tests**, JavaScript boundary/presentation checks and the official plugin validator pass. In an unmodified stock Linux Desktop, installation, permission handling, saving/searching a test fact, revocation, settings, the chat shortcut and inline-card preview were checked. Independent code review also covered the permission and source-copy boundaries.
+**136 Python tests** and 4 JavaScript boundary/presentation checks pass, and the official `hermes plugins validate` checks pass against Hermes 0.23.1 source (0.2.1-preview; sandbox run, not yet on a real install). In an unmodified stock Linux Desktop, installation, permission handling, saving/searching a test fact, revocation, settings, the chat shortcut and inline-card preview were checked. Independent code review also covered the permission and source-copy boundaries.
 
 This is a **working candidate, not full acceptance on every platform**. Windows and live-provider workflows still need end-to-end qualification. Agent failure fallback was tested without making paid provider calls. We do not claim the earlier 60% at 700-token benchmark target or demonstrated answer-quality gains.
 
