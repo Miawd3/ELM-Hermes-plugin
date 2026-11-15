@@ -12,6 +12,7 @@ HELP = ('ELM: /elm help | diagnostics (no memory or permission checks)\n'
         'Desktop/local setup: run `hermes elm grant` in a terminal (add -p PROFILE for a named profile) and pick this chat.\n'
         'Desktop/local: /elm on cannot grant access; rerun `hermes elm grant` after /elm off.\n'
         '/elm on | off | status | pending [offset] | list [offset] | sources [offset]\n'
+        '/elm private (this chat stops sharing and reading shared notes) · /elm private off\n'
         '/elm project <name|off> · /elm user on|off\n'
         '/elm capture on|off · /elm agent on|off · /elm organizer on|off\n'
         '/elm organize <source-id> (sends that source to the organizer model)\n'
@@ -19,20 +20,22 @@ HELP = ('ELM: /elm help | diagnostics (no memory or permission checks)\n'
         '/elm approve|trash|restore <id> · /elm edit <id> <text>\n'
         '/elm draft-skill \"Title\" <record-id> [up to four IDs] · /elm skill-sources <id>\n'
         '/elm search <query> · /elm agent-search <query> · /elm source <id> [offset]\n'
-        'Local chats only. New chats/branches need their own permission.\n'
+        'Local chats only. Without auto mode (`hermes elm auto on`), each new chat/branch needs its own permission.\n'
         'Approved recall is added to your conversation and may be sent to its model provider.\n'
         'Agent mode sends the search query to your configured model and may cost money. '
         'Capture saves plain-text turns locally; never enable it for secrets.')
 
 
-GRANT_ERRORS = ('exact_session_cli_grant_required','local_grant_expired_or_changed','change_permissions_with_local_grant_cli')
+GRANT_ERRORS = ('exact_session_cli_grant_required','local_grant_expired_or_changed','change_permissions_with_local_grant_cli',
+                'elm_auto_mode_off')
 
 
 def grant_hint(session_id):
     """Human next step for local chats. Only a plain ID is echoed into a shell line."""
     if isinstance(session_id, str) and re.fullmatch(r'[A-Za-z0-9._:-]{1,200}', session_id):
-        return f'ELM is not on for this chat. In a terminal run: hermes elm grant {session_id}  (add -p PROFILE for a named profile)'
-    return 'ELM is not on for this chat. In a terminal run: hermes elm grant  and pick this chat.'
+        return (f'ELM is not on for this chat. In a terminal run: hermes elm auto on  (all your chats) or '
+                f'hermes elm grant {session_id}  (this chat only; add -p PROFILE for a named profile)')
+    return 'ELM is not on for this chat. In a terminal run: hermes elm auto on  (all your chats) or hermes elm grant  and pick this chat.'
 
 
 def encode(value):
@@ -231,15 +234,35 @@ class Runtime:
                 'storage':'not_opened',
                 'note':'Context only. This does not verify installation, active profile, grant, expiry, or memory access. Grant with `hermes elm grant`, then use /elm status.'})
         try:
-            sid = self.sid(session_id,platform)
             verb,args = parts[0],parts[1:]
+            if platform == 'local' and verb == 'on' and not args and self.store.auto_status()['auto_on']:
+                # Auto mode: the owner allowed every chat from a terminal, so a chat switched off
+                # with /elm off may be switched back on here. Otherwise this still needs `hermes elm grant`.
+                sid = self.store.auto_chat_key(session_id)
+                self.store.settings(sid,{'enabled':True})
+                return 'ELM enabled for this chat. '+HELP
+            sid = self.sid(session_id,platform)
             if platform == 'local' and verb in ('on','project','user','capture','agent','organizer'):
                 raise Denied('change_permissions_with_local_grant_cli')
             if verb in ('on','off') and not args:
-                state=self.store.settings(sid,{'enabled':verb=='on'})
+                changes={'enabled':verb=='on'}
+                if verb == 'on': changes['auto']=False  # explicitly on: stays on if auto mode is switched off
+                state=self.store.settings(sid,changes)
                 return 'ELM '+('enabled for this chat. '+HELP if state['enabled'] else 'off for this chat. Saved data kept.')
+            if verb == 'private' and args in ([], ['on'], ['off']):
+                if args == ['off']:
+                    if platform == 'local' and not self.store.auto_status()['auto_on']:
+                        raise Denied('change_permissions_with_local_grant_cli')
+                    self.store.settings(sid,{'user_scope':True,'share_notes':True})
+                    return 'This chat uses shared memory again: it can recall notes from your other chats, and new notes here are shared.'
+                self.store.settings(sid,{'user_scope':False,'share_notes':False},keep_grant=True)
+                return ('This chat is private now: it no longer reads notes shared by your other chats, and new notes '
+                        'and routing history from here stay in this chat. Notes it already shared stay shared. Undo: /elm private off')
             if verb == 'status' and not args:
-                return encode(dict(self.store.settings(sid),permissions_via_cli=platform=='local'))
+                state=self.store.settings(sid)
+                return encode(dict(state,permissions_via_cli=platform=='local',
+                                   shared_memory=bool(state['user_scope'] and state['share_notes']),
+                                   auto_mode=self.store.auto_status()['auto_on']))
             if verb in ('user','capture','agent','organizer') and args in (['on'],['off']):
                 key={'user':'user_scope','capture':'capture','agent':'agent','organizer':'organizer'}[verb]
                 result=self.store.settings(sid,{key:args[0]=='on'})

@@ -154,6 +154,38 @@ class ElmMemoryProvider(MemoryProvider):
         except Exception:
             return
 
+    def post_setup(self, hermes_home, config):
+        """`hermes memory setup elm`: select ELM, then offer auto mode (ELM on for all chats).
+        Hermes hands setup over to this method entirely, so it saves `memory.provider` itself."""
+        import sys
+        from hermes_cli.config import save_config
+        from .stock_store import Store
+        memory = config.get('memory') if isinstance(config.get('memory'), dict) else {}
+        memory['provider'] = PROVIDER_NAME
+        config['memory'] = memory
+        save_config(config)
+        print('\n  Memory provider: elm (saved to config.yaml)')
+        store = Store(bound_connection(hermes_home))
+        status = store.auto_status()
+        if status['auto_on']:
+            print('  Auto mode is already on: ELM works in all your Desktop/TUI/CLI chats.')
+        elif sys.stdin.isatty():
+            from .cli import AUTO_NOTE
+            print('\n  ' + AUTO_NOTE)
+            try:
+                answer = input('  Turn ELM on for all your chats now (notes shared across chats)? [Y/n] ').strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                answer = 'n'  # nobody to answer: never turn it on silently
+                print()
+            if answer in ('', 'y', 'yes'):
+                store.set_auto(True, share=True)
+                print('  Auto mode ON. A chat can opt out with /elm private (no sharing) or /elm off.')
+            else:
+                print('  Auto mode stays off. Turn it on later with: hermes elm auto on')
+        else:
+            print('  Auto mode is off. Turn it on with: hermes elm auto on')
+        print('  Restart Hermes to apply. Check with: hermes elm doctor\n')
+
     def on_pre_compress(self, messages):
         return ''  # approved notes live in ELM's store already; nothing to hand the summarizer
 

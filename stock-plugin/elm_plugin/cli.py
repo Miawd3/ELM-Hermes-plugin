@@ -114,6 +114,12 @@ def doctor(store):
     print(f'ELM {plugin_version()} on Hermes {hermes_version()} ({platform.system()} {platform.release()}, Python {platform.python_version()})')
     print(f'Profile: {display_hermes_home()}')
     from .stock_runtime import provider_configured
+    try:
+        status = store.auto_status()
+        print('Auto mode: ' + (('on, notes shared' if status['share'] else 'on, notes per chat') if status['auto_on']
+                               else 'off (chats need hermes elm grant / /elm on)'))
+    except Exception:
+        pass
     print('Memory slot: ELM is the memory provider (memory.provider: elm)' if provider_configured()
           else 'Memory slot: not selected; recall runs through plugin hooks (hermes memory setup elm to switch)')
     try:
@@ -164,6 +170,42 @@ def routes(store):
     return 0
 
 
+AUTO_NOTE = ('ELM will be on for every Desktop, TUI and CLI chat in this profile (never for messaging apps, '
+             'cron jobs, subagents or editor-connected ACP chats). Notes are shared across those chats unless '
+             'a chat says /elm private. Recalled notes go to that chat\'s model provider like any message. '
+             'The AI cannot change this setting.')
+
+
+def auto(store, args):
+    """`hermes elm auto [on|off] [--private] [--yes]`: ELM on for all chats of this profile."""
+    if args.state is None:
+        status = store.auto_status()
+        print('Auto mode: ' + ('ON - ELM is on for all your Desktop/TUI/CLI chats' if status['auto_on'] else
+                               'off - chats need `hermes elm grant` (Desktop/TUI) or /elm on (classic CLI)'))
+        if status['auto_on']:
+            print('Notes: ' + ('shared across chats (a chat can opt out with /elm private)' if status['share']
+                              else 'kept per chat (--private)'))
+        return 0
+    if args.state == 'off':
+        store.set_auto(False, share=store.auto_status()['share'])
+        print('Auto mode off. Chats that were on only because of auto mode are off now; '
+              'chats you granted yourself keep their grant. Saved notes are kept.')
+        return 0
+    if not args.yes:
+        print(AUTO_NOTE)
+        if not sys.stdin.isatty():
+            print('Add --yes to confirm non-interactively.')
+            return 1
+        if input('Turn ELM on for all chats? [y/N] ').strip().lower() not in ('y', 'yes'):
+            print('Cancelled. Nothing was changed.')
+            return 1
+    store.set_auto(True, share=not args.private)
+    print('Auto mode ON: ELM is on for all your Desktop/TUI/CLI chats in this profile '
+          f'({"notes kept per chat" if args.private else "notes shared across chats; /elm private opts a chat out"}).')
+    print('Restart Hermes if a chat is already open. Undo: hermes elm auto off')
+    return 0
+
+
 def run(args, store_factory):
     from hermes_constants import display_hermes_home
     store = store_factory()
@@ -171,6 +213,8 @@ def run(args, store_factory):
         return doctor(store)
     if args.elm_command == 'routes':
         return routes(store)
+    if args.elm_command == 'auto':
+        return auto(store, args)
     if args.elm_command == 'sessions':
         rows = _listed(args.limit)
         if rows is None:
@@ -219,6 +263,10 @@ def setup_cli(parser, store_or_factory):
     revoke.add_argument('session', nargs='?', help='Chat ID; omit to pick from recent chats')
     subs.add_parser('doctor', help='Show versions, storage health and counts (safe for bug reports)')
     subs.add_parser('routes', help='Show ELM agent routing: configured agents and how they did')
+    auto_parser = subs.add_parser('auto', help='Turn ELM on (or off) for all your chats in this profile')
+    auto_parser.add_argument('state', nargs='?', choices=('on', 'off'), help='Omit to show the current setting')
+    auto_parser.add_argument('--private', action='store_true', help='Keep notes per chat instead of sharing them')
+    auto_parser.add_argument('-y', '--yes', action='store_true', help='Skip the confirmation prompt')
     sessions = subs.add_parser('sessions', help='List recent chats with their IDs')
     sessions.add_argument('--limit', type=int, default=15)
 

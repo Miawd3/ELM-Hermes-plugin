@@ -29,7 +29,7 @@ def session_key(session_id, surface):
     return hashlib.sha256(session_id.encode()).hexdigest()
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 _SCHEMA = (
     """CREATE TABLE IF NOT EXISTS stock_local_grants (
       session TEXT PRIMARY KEY, expires REAL NOT NULL, revision INTEGER NOT NULL)""",
@@ -69,7 +69,13 @@ _SCHEMA = (
       id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, session TEXT NOT NULL,
       terms TEXT NOT NULL, ok INTEGER NOT NULL, duration_ms INTEGER NOT NULL, created REAL NOT NULL)""",
     "CREATE INDEX IF NOT EXISTS stock_route_outcomes_session ON stock_route_outcomes(session)",
+    # Profile-wide "ELM on for all my chats" (schema 5). Set only from a terminal (`hermes elm auto`).
+    """CREATE TABLE IF NOT EXISTS stock_profile (
+      singleton INTEGER PRIMARY KEY CHECK(singleton=1), auto_on INTEGER NOT NULL DEFAULT 0,
+      share INTEGER NOT NULL DEFAULT 1, updated REAL NOT NULL DEFAULT 0)""",
 )
+# Surfaces whose chats auto mode turns on. Never ACP (editor clients), messaging, cron or subagents.
+AUTO_SURFACES = frozenset(('local', 'cli', 'tui', 'desktop'))
 ROUTE_PENDING_SECONDS = 900   # a routed task that never started is forgotten after 15 minutes
 ROUTE_OUTCOMES_KEPT = 2000
 ROUTE_FAILED = frozenset(('failed', 'error', 'timeout'))  # 'completed' succeeds; interrupts etc. are not counted
@@ -117,6 +123,11 @@ class Store:
                 db.execute('ALTER TABLE stock_sessions ADD COLUMN organizer INTEGER NOT NULL DEFAULT 0')
             if 'revision' not in {r[1] for r in db.execute('PRAGMA table_info(stock_sessions)')}:
                 db.execute('ALTER TABLE stock_sessions ADD COLUMN revision INTEGER NOT NULL DEFAULT 0')
+            session_columns = {r[1] for r in db.execute('PRAGMA table_info(stock_sessions)')}
+            if 'auto' not in session_columns:  # 1 = turned on by the profile's auto mode
+                db.execute('ALTER TABLE stock_sessions ADD COLUMN auto INTEGER NOT NULL DEFAULT 0')
+            if 'share_notes' not in session_columns:  # 1 = notes saved here go to shared memory
+                db.execute('ALTER TABLE stock_sessions ADD COLUMN share_notes INTEGER NOT NULL DEFAULT 0')
             if 'search_text' not in {r[1] for r in db.execute('PRAGMA table_info(stock_records)')}:
                 db.execute("ALTER TABLE stock_records ADD COLUMN search_text TEXT NOT NULL DEFAULT ''")
                 for rid,content,tags in db.execute('SELECT id,content,tags FROM stock_records').fetchall():
@@ -139,12 +150,59 @@ class Store:
         return row[0] if row else sid
 
     def resolve(self, session_id, surface):
-        """Hashed, alias-resolved chat key. Local (unified Desktop) chats also need a live grant."""
+        """Hashed, alias-resolved chat key. Local (unified Desktop) chats also need a live grant,
+        unless the owner turned on auto mode for the whole profile."""
         if surface == 'local':
             return self.require_local_grant(session_id)
         sid = session_key(session_id, surface)
+        with closing(self.open()) as db, db:
+            sid = self.root(db, sid)
+            if surface in AUTO_SURFACES:
+                self._auto_provision(db, sid)
+            return sid
+
+    # -- Auto mode: "ELM on for all my chats" (owner's terminal only) -------------------------
+
+    @staticmethod
+    def _profile(db):
+        row = db.execute('SELECT auto_on,share FROM stock_profile WHERE singleton=1').fetchone()
+        return (bool(row[0]), bool(row[1])) if row else (False, True)
+
+    def _auto_provision(self, db, sid):
+        """In auto mode, give a chat ELM on first use (shared notes unless the profile is private).
+        A chat that already has settings (e.g. switched off with /elm off) keeps them."""
+        auto_on, share = self._profile(db)
+        if not auto_on:
+            return False
+        if not db.execute('SELECT 1 FROM stock_sessions WHERE session=?', (sid,)).fetchone():
+            db.execute('INSERT INTO stock_sessions(session,enabled,user_scope,auto,share_notes) VALUES(?,1,?,1,?)',
+                       (sid, int(share), int(share)))
+        return True
+
+    def auto_chat_key(self, session_id):
+        """For `/elm on` in a local chat: allowed only while auto mode is on (the owner already
+        allowed every chat). Returns the chat key without requiring the chat to be on."""
+        sid = session_key(session_id, 'cli')
+        with closing(self.open()) as db, db:
+            sid = self.root(db, sid)
+            if not self._auto_provision(db, sid):
+                raise Denied('change_permissions_with_local_grant_cli')
+            return sid
+
+    def auto_status(self):
         with closing(self.open()) as db:
-            return self.root(db, sid)
+            auto_on, share = self._profile(db)
+        return {'auto_on': auto_on, 'share': share}
+
+    def set_auto(self, on, share=True):
+        """Out-of-band CLI / memory setup only. Never registered as a tool or slash command."""
+        if type(on) is not bool or type(share) is not bool:
+            raise ValueError('invalid_setting')
+        with closing(self.open()) as db, db:
+            db.execute('INSERT INTO stock_profile(singleton,auto_on,share,updated) VALUES(1,?,?,?) '
+                       'ON CONFLICT(singleton) DO UPDATE SET auto_on=excluded.auto_on,share=excluded.share,updated=excluded.updated',
+                       (int(on), int(share), time.time()))
+        return self.auto_status()
 
     def health(self):
         """Counts only (never content or IDs), for `hermes elm doctor` and bug reports."""
@@ -223,14 +281,32 @@ class Store:
 
     @staticmethod
     def state(db, sid, require=True):
-        row = db.execute('SELECT enabled,project,user_scope,capture,agent,organizer,revision FROM stock_sessions WHERE session=?', (sid,)).fetchone()
-        state = dict(zip(('enabled','project','user_scope','capture','agent','organizer','revision'), row or (0,None,0,0,0,0,0)))
+        row = db.execute('SELECT enabled,project,user_scope,capture,agent,organizer,revision,auto,share_notes '
+                         'FROM stock_sessions WHERE session=?', (sid,)).fetchone()
+        state = dict(zip(('enabled','project','user_scope','capture','agent','organizer','revision','auto','share_notes'),
+                         row or (0,None,0,0,0,0,0,0,0)))
+        if not require:
+            return state
         grant = db.execute('SELECT expires,revision FROM stock_local_grants WHERE session=?',(sid,)).fetchone()
-        if require and grant and (grant[0] <= time.time() or grant[1] != state['revision']):
+        grant_ok = bool(grant) and grant[0] > time.time() and grant[1] == state['revision']
+        auto_on = Store._profile(db)[0] if ((grant and not grant_ok) or state['auto']) else False
+        if grant and not grant_ok and not auto_on:
             raise Denied('local_grant_expired_or_changed')
-        if require and not state['enabled']:
+        if state['auto'] and not auto_on and not grant_ok:
+            raise Denied('elm_auto_mode_off')  # turned on only by auto mode, which the owner switched off
+        if not state['enabled']:
             raise Denied('enable_this_chat_with_slash_elm_on')
         return state
+
+    @staticmethod
+    def note_scope(sid, state, kind):
+        """Where a new note goes: its project, shared memory (auto-shared chats; `user` notes with
+        --user), else this chat only."""
+        if kind == 'project' and state['project']:
+            return 'project:' + state['project']
+        if state['user_scope'] and (state['share_notes'] or kind == 'user'):
+            return 'user:local-profile'
+        return 'chat:' + sid
 
     @staticmethod
     def scopes(sid, state):
@@ -278,11 +354,15 @@ class Store:
             self.state(db,sid)
             return result
 
-    def settings(self, sid, changes=None):
+    def settings(self, sid, changes=None, keep_grant=False):
+        """``keep_grant``: only for changes that make a chat MORE private (/elm private); a local
+        grant stays valid instead of being invalidated by the settings revision bump."""
+        if keep_grant and changes and any(v is not False for v in changes.values()):
+            raise ValueError('invalid_setting')
         with closing(self.open()) as db, db:
             db.execute('INSERT OR IGNORE INTO stock_sessions(session) VALUES(?)', (sid,))
             if changes:
-                if set(changes) - {'enabled','project','user_scope','capture','agent','organizer'}:
+                if set(changes) - {'enabled','project','user_scope','capture','agent','organizer','share_notes','auto'}:
                     raise ValueError('invalid_setting')
                 for key,value in changes.items():
                     if key == 'project':
@@ -291,6 +371,9 @@ class Store:
                         raise ValueError('invalid_setting')
                     db.execute('UPDATE stock_sessions SET ' + key + '=? WHERE session=?', (value,sid))
                 db.execute('UPDATE stock_sessions SET revision=revision+1 WHERE session=?',(sid,))
+                if keep_grant:
+                    db.execute('UPDATE stock_local_grants SET revision=(SELECT revision FROM stock_sessions WHERE session=?) '
+                               'WHERE session=?', (sid, sid))
             return self.state(db, sid, False)
 
     def grant_local(self, session_id, *, hours=24, project=None, user=False, capture=False, agent=False, organizer=False):
@@ -303,7 +386,7 @@ class Store:
             db.execute('BEGIN IMMEDIATE')
             sid=self.root(db,sid)
             db.execute('INSERT OR IGNORE INTO stock_sessions(session) VALUES(?)',(sid,))
-            db.execute('UPDATE stock_sessions SET enabled=1,project=?,user_scope=?,capture=?,agent=?,organizer=?,revision=revision+1 WHERE session=?',
+            db.execute('UPDATE stock_sessions SET enabled=1,project=?,user_scope=?,capture=?,agent=?,organizer=?,auto=0,share_notes=0,revision=revision+1 WHERE session=?',
                        (project,user,capture,agent,organizer,sid))
             revision=self.state(db,sid,False)['revision']
             expires=time.time()+hours*3600
@@ -322,7 +405,9 @@ class Store:
             db.execute('BEGIN')
             sid=self.root(db,sid)
             if not db.execute('SELECT 1 FROM stock_local_grants WHERE session=?',(sid,)).fetchone():
-                raise Denied('exact_session_cli_grant_required')
+                if not self._auto_provision(db,sid):  # auto mode: the owner turned ELM on for all chats
+                    raise Denied('exact_session_cli_grant_required')
+                db.commit(); db.execute('BEGIN')
             self.state(db,sid)
         return sid
 
@@ -336,9 +421,7 @@ class Store:
             state = self.state(db,sid)
             if expected_revision is not None and state['revision'] != expected_revision: raise Denied('scope_changed_retry')
             if expected_store is not None and expected_store != db.execute('SELECT identity FROM stock_read_epoch WHERE singleton=1').fetchone()[0]: raise Denied('memory_changed_retry')
-            scope = 'chat:' + sid
-            if kind == 'project' and state['project']: scope = 'project:' + state['project']
-            if kind == 'user' and state['user_scope']: scope = 'user:local-profile'
+            scope = self.note_scope(sid, state, kind)
             if source_id is not None:
                 if not db.execute('SELECT id FROM stock_sources WHERE id=? AND session=?',(source_id,sid)).fetchone():
                     raise Denied('source_not_in_this_chat')
@@ -495,9 +578,7 @@ class Store:
             result=[]
             for record in records:
                 kind,content,tags=record['kind'],record['text'],record['tags']
-                scope='chat:'+sid
-                if kind=='project' and state['project']:scope='project:'+state['project']
-                if kind=='user' and state['user_scope']:scope='user:local-profile'
+                scope=self.note_scope(sid,state,kind)
                 previous=db.execute('SELECT id,status FROM stock_records WHERE scope=? AND source_id=? AND kind=? AND content=?',(scope,source_id,kind,content)).fetchone()
                 if previous:
                     result.append({'id':previous[0],'status':previous[1],'existing':True})
