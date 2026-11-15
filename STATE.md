@@ -12,7 +12,9 @@ Short handoff for the next session. Keep this file current instead of adding new
   The previous install (GitHub `0b50a49`) plus the (empty) database are backed up in
   `plugin-data\elm\backup-before-0.2.1-20261114\`. `.install-metadata.json` still says
   `0b50a49`: running `hermes plugins update elm` before this branch is pushed would replace 0.2.1 with GitHub `main`.
-- **Unpushed branch:** `elm-stock-fixes-20261114` (this session had no push access). Testers install from `main`, so it must be merged to `main` before sending TESTING.md to anyone.
+- **Branch pushed:** `elm-stock-fixes-20261114`, draft PR https://github.com/Miawd3/ELM-Hermes-plugin/pull/1 (not merged; owner decides).
+  Testers install from `main`, so it must be merged to `main` before sending TESTING.md to anyone.
+- **Test profile:** `elmtest` (DeepSeek `deepseek-v4-flash`) exists on the owner's PC for UI spot checks; delete with `hermes profile delete elmtest`.
 
 ## Architecture (stock plugin)
 
@@ -37,16 +39,34 @@ Unified Desktop/TUI/ACP chats report `local`, so they need `hermes elm grant` (o
 7. `hermes elm doctor` (versions, paths, counts only) for bug reports; local-chat denials now include a `hint` with the grant command.
 8. User README rewritten for outside testers; TESTING.md checklist (17 steps) + report template; CHANGELOG.md.
 
+## Verified on the owner's Windows PC (2026-11-14, Claude Code)
+
+- Unit tests: 136 Python OK with Hermes's Python 3.14 (after a test-only fix: 21 tearDown errors from open
+  SQLite files, also present on `main`); 4 Desktop JS checks pass.
+- Real `hermes plugins validate` on the installed plugin: all checks pass. `hermes elm doctor`: Storage ok, schema 2.
+- Live, `elmtest` profile, driven through the gateway like Desktop (`elm-test-mcp/run_checklist`, 12/12):
+  ungranted chat refused with grant hint; CLI grant; `/elm save`; automatic recall with DeepSeek answered
+  4411 with no tool calls; trivial "thanks" gets a normal reply; other chat refused; `/elm off` blocks;
+  re-grant keeps notes; `hermes sessions delete` purges chat-only notes (1 → 0) via `on_session_delete`.
+- Real compression (16 → 12 messages): grant stays on and the note is still searchable afterwards.
+
 ## Not verified yet
 
-- Real Windows Desktop run of 0.2.1 (needs: restart Hermes, `hermes elm grant`, save + recall, compress a chat, delete a chat).
-- `hermes plugins validate`: all 16 checks pass, no warnings, against Hermes 0.23.1 source in a sandbox (ruamel.yaml replaced by a PyYAML stand-in). Re-run on a real install: `hermes plugins validate %LOCALAPPDATA%\hermes\plugins\elm`.
+- Compression that **rotates** the session ID (the `stock_session_alias` path): Hermes 0.23.1 compressed in
+  place in the gateway test, so the ID never changed. Still unit-tested only.
+- Recall answer after compression: the note was injected, but DeepSeek refused to repeat a "door code"
+  (treated it as a credential). Fixture problem, not an ELM bug; TESTING.md should use a non-sensitive fact.
+- Desktop delete button itself (HTTP `DELETE /api/sessions/{id}`); it fires the same state-layer hook as the CLI delete.
+- UI steps 2, 12, 13 (settings page, memory manager, inline cards) in Hermes Desktop.
 - `hermes elm sessions` against a real `state.db` (unit-tested with a stub; it degrades to `hermes sessions list`).
+
+Test-helper fixes (in `Documents\Hermes\workspace\elm-test-mcp`, not in this repo): the gateway has no
+`session.delete` RPC (use `hermes sessions delete`); `prompt.submit` with `finite`/`unattended` is refused;
+a new connection must `session.resume` a chat before submitting prompts.
 
 ## Next steps (agreed direction)
 
-1. Owner runs TESTING.md once on Windows Desktop (computer use is not available to Claude), then merge to `main` and send to testers.
-   Unverified behaviours most likely to differ live: whether Desktop's delete is a real delete (`reason='delete'`) and whether `/compress` fires `post_compaction`.
+1. Owner spot-checks UI steps 2, 12, 13 in Desktop on `elmtest`, then merge to `main` and send TESTING.md to testers.
 2. Decide grant model: keep terminal-only, or allow `/elm on` + in-chat confirmation (`ctx.ask_choice`).
 3. Move recall/storage into the `MemoryProvider` slot (`memory.provider: elm`) for prefetch, `on_pre_compress`, `on_session_end`, recall indicator.
 4. Agent routing as a `DelegationProvider` plugin + routing/orchestration skill.
