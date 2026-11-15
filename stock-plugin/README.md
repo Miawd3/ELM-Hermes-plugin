@@ -108,6 +108,25 @@ history. Set `learn: false` to only use your choice or the default.
 The ELM plugin must be enabled for routing (`hermes plugins enable elm`). Nous's official
 *Advanced Delegation* plugin is an alternative backend without memory; only one backend is active.
 
+## Works well with: Hermes.Crew (recommended)
+
+For bigger, multi-step jobs we recommend **[Hermes.Crew](https://crew.forgecoreai.com)**
+([source](https://github.com/macd2/Crew), Apache-2.0, free). It is a separate project by another
+author, not part of ELM. One `/crew <ask>` message becomes a card on Hermes's kanban board, and a
+coordinator owns it until a proof command shows the work is really done. ELM remembers; Crew gets
+things done and checks them. They don't overlap and run side by side.
+
+It is in Hermes's official plugin catalog:
+
+```sh
+hermes plugins install crew
+```
+
+Then follow its README to run its installer (`install.py --profile NAME`). Read its disclosure first:
+the installer creates four `crew-*` profiles copied from your chat profile (settings and provider keys).
+ELM's notes are **not** copied into them, and ELM stays off in those profiles' chats unless you grant it.
+On Windows, Crew needs Git for Windows.
+
 ## What happens when…
 
 - **A long chat is compressed:** ELM keeps the chat's access and its private notes, even if Hermes moves the chat to a new session ID.
