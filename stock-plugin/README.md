@@ -36,9 +36,11 @@ hermes memory setup elm        # or: hermes config set memory.provider elm
 ```
 
 Restart Hermes. `hermes elm doctor` then says `Memory slot: ELM is the memory provider`, and chats show
-**🧠 ELM — recalled N memories** when a note is added. Everything else (grants, `/elm` commands,
-privacy) works exactly the same; Hermes's own built-in memory keeps working next to it. ELM recalls
-the same way in both modes, never twice. To go back: `hermes config set memory.provider builtin`.
+**🧠 ELM — recalled N memories** when a note is added. Grants, `/elm` commands and privacy rules are
+the same in both modes, and a note is never added twice. Keep the plugin enabled
+(`hermes plugins enable elm`): `/elm`, `hermes elm grant` and routing come from the plugin side.
+Hermes's own built-in memory keeps working next to it. To go back:
+`hermes config set memory.provider builtin`, then restart Hermes.
 Only one external memory provider can be active, so this replaces another one (for example Honcho or mem0) if you had it.
 
 ## Turn ELM on for a chat
@@ -78,7 +80,7 @@ Model choices for the optional search planner and organizer: **Settings → Mode
 
 When Hermes hands work to a subagent (`delegate_task`), ELM can choose **which agent** does it and
 learn from how it went. You name your agents; each is a model or one of your Hermes profiles
-(a profile brings its own model, skills, SOUL.md and its own ELM memory):
+(a profile brings its own model, skills and SOUL.md; subagents never read ELM memory):
 
 ```yaml
 # config.yaml of the profile (or: hermes config set delegation.backends.elm.agents.quick.model ...)
@@ -97,9 +99,12 @@ Restart Hermes (or `/new`). The model now sees your agent names and descriptions
 per task. If it doesn't, ELM picks the agent that succeeded most on similar earlier tasks, else your
 `default`, else the chat's own model. `hermes elm routes` shows your agents and how each did.
 
-What ELM remembers for routing: the agent's name, a few keywords of the task, whether it finished,
-and how long it took. Nothing else, never the results, and only for chats where ELM is on. Deleting
-a chat deletes its routing history. Set `learn: false` to only use your choice or the default.
+Routing learns only in chats where ELM is on, and like notes it stays private: a chat learns from
+its own tasks, plus chats of the same granted project, plus chats sharing user memory when it does.
+Chats without ELM just use your choice or the default. What ELM remembers: the agent's name, up to
+12 plain words from the task (no numbers, codes or keys), whether it finished, and how long it took.
+Never the task text or results. Revoking ELM stops recording; deleting a chat deletes its routing
+history. Set `learn: false` to only use your choice or the default.
 The ELM plugin must be enabled for routing (`hermes plugins enable elm`). Nous's official
 *Advanced Delegation* plugin is an alternative backend without memory; only one backend is active.
 

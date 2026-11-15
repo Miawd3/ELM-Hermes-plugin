@@ -108,9 +108,20 @@ def history_text(history):
     return '\n'.join(parts)
 
 
-def provider_selected():
-    """True when this profile runs ELM in Hermes's memory-provider slot (`memory.provider: elm`).
-    Then the provider recalls and captures, and the general hooks below must not do it again."""
+INJECTED_ID = re.compile(r'"id": "([0-9a-f]{32})"')
+ROUTING_TERM = re.compile(r'[^\W\d_]{3,24}')  # plain words only: no numbers, codes, keys or IDs
+
+
+def routing_terms(goal):
+    """Up to 12 plain-word keywords of a delegated goal (stopwords, digits, tokens with digits dropped)."""
+    if not isinstance(goal, str):
+        return []
+    words = (w for w in re.findall(r'\w+', goal.casefold()) if ROUTING_TERM.fullmatch(w))
+    return list(dict.fromkeys(w for w in words if w not in STOPWORDS))[:12]
+
+
+def provider_configured():
+    """True when this profile's config selects ELM as memory provider (for `hermes elm doctor`)."""
     try:
         from hermes_cli.config import load_config_readonly
         memory = load_config_readonly().get('memory') or {}
@@ -119,10 +130,16 @@ def provider_selected():
         return False
 
 
+def provider_serving(session_id):
+    """True when ELM's memory provider is live for this chat in this process: the hooks step aside."""
+    from .serving import current_home, serving
+    return serving(current_home(), session_id)
+
+
 class Runtime:
-    def __init__(self,ctx,store=None,provider_selected=provider_selected):
+    def __init__(self,ctx,store=None,provider_selected=provider_serving):
         self.ctx,self.store = ctx,store or Store()
-        self.provider_selected = provider_selected
+        self.provider_selected = provider_selected  # (session_id) -> bool
         # Record IDs already injected per chat, so automatic recall does not repeat them
         # every turn. Process-local; cleared for a chat when its context is compacted.
         self._injected = OrderedDict()
@@ -131,6 +148,18 @@ class Runtime:
     def sid(self,session_id,platform=None):
         surface = platform if platform is not None else self.ctx.session_surface()
         return self.store.resolve(session_id, 'desktop' if surface == 'gui' else surface)
+
+    def authorized(self,session_id,platform=None):
+        """The chat key, only if ELM is on for this chat now (same rule as recall: grant / enabled)."""
+        sid = self.sid(session_id, platform)
+        self.store.authorized_settings(sid)
+        return sid
+
+    def remember_injected_from(self, sid, messages):
+        """Rebuild the no-repeat set from the conversation (after a restart the process cache is empty)."""
+        ids = INJECTED_ID.findall(history_text(messages))
+        if ids:
+            self._remember_injected(sid, ids)
 
     def _already_injected(self, sid):
         with self._injected_lock:
@@ -296,8 +325,8 @@ class Runtime:
 
     def before_turn(self,*,session_id='',user_message='',conversation_history=None,**kwargs):
         try:
-            if self.provider_selected():
-                return None  # the memory provider recalls instead
+            if self.provider_selected(session_id):
+                return None  # the memory provider recalls for this chat instead
             message = plain_text(user_message)
             if trivial(message):
                 return None
@@ -335,25 +364,39 @@ class Runtime:
         try:
             if not (child_session_id and isinstance(child_goal, str) and child_goal.strip()):
                 return None
-            sid = self.sid(parent_session_id)  # raises unless the parent chat is granted / on
-            self.store.route_started(sid, child_session_id, child_goal, content_terms(child_goal))
+            sid = self.authorized(parent_session_id)  # raises unless ELM is on for the parent chat
+            self.store.route_started(sid, child_session_id, child_goal, routing_terms(child_goal))
         except Exception:
             return None
 
     def subagent_stopped(self,*,child_session_id='',child_status=None,duration_ms=0,**kwargs):
         try:
             if child_session_id:
-                self.store.route_finished(child_session_id, child_status == 'completed', duration_ms)
+                self.store.route_finished(child_session_id, child_status, duration_ms)
         except Exception:
             return None
 
     def after_turn(self,*,session_id='',user_message='',assistant_response='',**kwargs):
         try:
-            if self.provider_selected():
-                return None  # the memory provider's sync_turn captures instead
+            if self.provider_selected(session_id):
+                return None  # the memory provider's sync_turn captures for this chat instead
             self.store.capture_turn(self.sid(session_id),plain_text(user_message),plain_text(assistant_response))
         except Exception:
             return None
+
+
+class _NoSessionContext:
+    """For the memory loader's collector: the lifecycle hooks below never read the session surface."""
+    def session_surface(self):
+        return ''
+
+
+def register_lifecycle_hooks(ctx):
+    """Memory-only registration: delete purge and compaction carry-over must still run."""
+    runtime = Runtime(_NoSessionContext())
+    ctx.register_hook('post_compaction', runtime.after_compaction)
+    ctx.register_hook('on_session_delete', runtime.session_deleted)
+    return runtime
 
 
 def register_stock(ctx):
@@ -381,7 +424,8 @@ def register_stock(ctx):
     except ImportError:  # Hermes without pluggable delegation: no ELM routing backend
         ElmDelegationProvider = None
     if ElmDelegationProvider is not None and hasattr(ctx, 'register_delegation_provider'):
-        ctx.register_delegation_provider(ElmDelegationProvider())  # selected with delegation.backend: elm
+        # selected with delegation.backend: elm; checks the calling chat through this runtime
+        ctx.register_delegation_provider(ElmDelegationProvider(runtime=runtime))
     from . import cli as elm_cli
     ctx.register_cli_command(name='elm',help='Grant ELM memory to one chat, revoke it, or list recent chats',
                              setup_fn=lambda parser:elm_cli.setup_cli(parser,runtime.store),description=elm_cli.__doc__)

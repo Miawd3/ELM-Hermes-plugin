@@ -29,7 +29,7 @@ def session_key(session_id, surface):
     return hashlib.sha256(session_id.encode()).hexdigest()
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _SCHEMA = (
     """CREATE TABLE IF NOT EXISTS stock_local_grants (
       session TEXT PRIMARY KEY, expires REAL NOT NULL, revision INTEGER NOT NULL)""",
@@ -55,10 +55,13 @@ _SCHEMA = (
     """CREATE TABLE IF NOT EXISTS stock_session_alias (
       session TEXT PRIMARY KEY, root TEXT NOT NULL)""",
     "CREATE INDEX IF NOT EXISTS stock_session_alias_root ON stock_session_alias(root)",
-    # Memory-aware routing (schema 3). No task or result text: hashed goals, agent names, a few
-    # keywords of the goal (only for chats with ELM on), success and duration.
-    """CREATE TABLE IF NOT EXISTS stock_route_pending (
-      goal TEXT PRIMARY KEY, agent TEXT NOT NULL, chosen_by TEXT NOT NULL, created REAL NOT NULL)""",
+    # Memory-aware routing. No task or result text: hashed goals, agent names, a few plain-word
+    # keywords of the goal, success and duration - all tied to one authorized chat (purged with it).
+    "DROP TABLE IF EXISTS stock_route_pending",  # unreleased schema-3 shape, not tied to a chat
+    """CREATE TABLE IF NOT EXISTS stock_route_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, goal TEXT NOT NULL, session TEXT NOT NULL,
+      agent TEXT NOT NULL, created REAL NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS stock_route_queue_goal ON stock_route_queue(session,goal)",
     """CREATE TABLE IF NOT EXISTS stock_route_runs (
       child TEXT PRIMARY KEY, agent TEXT NOT NULL, session TEXT NOT NULL, terms TEXT NOT NULL,
       created REAL NOT NULL)""",
@@ -67,8 +70,9 @@ _SCHEMA = (
       terms TEXT NOT NULL, ok INTEGER NOT NULL, duration_ms INTEGER NOT NULL, created REAL NOT NULL)""",
     "CREATE INDEX IF NOT EXISTS stock_route_outcomes_session ON stock_route_outcomes(session)",
 )
-ROUTE_PENDING_SECONDS = 3600
+ROUTE_PENDING_SECONDS = 900   # a routed task that never started is forgotten after 15 minutes
 ROUTE_OUTCOMES_KEPT = 2000
+ROUTE_FAILED = frozenset(('failed', 'error', 'timeout'))  # 'completed' succeeds; interrupts etc. are not counted
 
 
 def _hash(session_id):
@@ -210,6 +214,7 @@ class Store:
                 sources = db.execute('DELETE FROM stock_sources WHERE session=?', (root,)).rowcount
                 settings = db.execute('DELETE FROM stock_sessions WHERE session=?', (root,)).rowcount
                 db.execute('DELETE FROM stock_local_grants WHERE session=?', (root,))
+                db.execute('DELETE FROM stock_route_queue WHERE session=?', (root,))
                 db.execute('DELETE FROM stock_route_runs WHERE session=?', (root,))
                 db.execute('DELETE FROM stock_route_outcomes WHERE session=?', (root,))
                 if records or sources or settings:
@@ -507,31 +512,44 @@ class Store:
     # route_task (no session context) -> subagent_start (child id + goal) -> subagent_stop (status).
     # Goals are linked by hash only; keywords are kept only when the parent chat has ELM on.
 
-    def route_pending(self, goal, agent, chosen_by):
+    # Every routing row belongs to one parent chat (``sid``) that the caller already resolved through
+    # the same authorization as recall; each step re-checks that chat's grant/state inside its write.
+
+    def route_pending(self, sid, goal, agent):
+        """Queue route_task's choice for one task of an authorized chat. ``agent=''``: the parent's route
+        (queued anyway so tasks of one batch with the same goal stay in order)."""
         key = _hash(goal.strip()) if isinstance(goal, str) else None
         if key is None:
             return
         now = time.time()
         with closing(self.open()) as db, db:
-            db.execute('DELETE FROM stock_route_pending WHERE created<?', (now - ROUTE_PENDING_SECONDS,))
-            db.execute('INSERT OR REPLACE INTO stock_route_pending VALUES(?,?,?,?)', (key, agent, chosen_by, now))
+            db.execute('BEGIN IMMEDIATE')
+            db.execute('DELETE FROM stock_route_queue WHERE created<?', (now - ROUTE_PENDING_SECONDS,))
+            self.state(db, sid)
+            db.execute('INSERT INTO stock_route_queue(goal,session,agent,created) VALUES(?,?,?,?)', (key, sid, agent, now))
 
     def route_started(self, sid, child_session_id, goal, terms):
-        """Link a spawned child to the agent route_task chose. ``sid``: the parent chat, already authorized."""
+        """Link a spawned child to this chat's oldest queued choice for the same goal (FIFO: Hermes routes
+        every task of a batch, then builds the children in the same order)."""
         key, child = (_hash(goal.strip()) if isinstance(goal, str) else None), _hash(child_session_id)
         if key is None or child is None:
             return None
         with closing(self.open()) as db, db:
             db.execute('BEGIN IMMEDIATE')
-            row = db.execute('SELECT agent FROM stock_route_pending WHERE goal=?', (key,)).fetchone()
+            db.execute('DELETE FROM stock_route_queue WHERE created<?', (time.time() - ROUTE_PENDING_SECONDS,))
+            row = db.execute('SELECT id,agent FROM stock_route_queue WHERE session=? AND goal=? ORDER BY id LIMIT 1',
+                             (sid, key)).fetchone()
             if not row:
                 return None
-            db.execute('DELETE FROM stock_route_pending WHERE goal=?', (key,))
+            db.execute('DELETE FROM stock_route_queue WHERE id=?', (row[0],))
+            if not row[1]:
+                return None  # the task ran on the parent's route: nothing to learn
+            self.state(db, sid)
             db.execute('INSERT OR REPLACE INTO stock_route_runs VALUES(?,?,?,?,?)',
-                       (child, row[0], sid, json.dumps(list(terms)[:12]), time.time()))
-            return row[0]
+                       (child, row[1], sid, json.dumps(list(terms)[:12]), time.time()))
+            return row[1]
 
-    def route_finished(self, child_session_id, ok, duration_ms):
+    def route_finished(self, child_session_id, status, duration_ms):
         child = _hash(child_session_id)
         if child is None:
             return None
@@ -541,17 +559,30 @@ class Store:
             if not row:
                 return None
             db.execute('DELETE FROM stock_route_runs WHERE child=?', (child,))
+            if status != 'completed' and status not in ROUTE_FAILED:
+                return None  # interrupted / cancelled: says nothing about the agent
+            try:
+                self.state(db, row[1])  # revoked or expired while the child ran: record nothing
+            except Denied:
+                return None
             duration = int(duration_ms) if isinstance(duration_ms, (int, float)) and duration_ms >= 0 else 0
             db.execute('INSERT INTO stock_route_outcomes(agent,session,terms,ok,duration_ms,created) VALUES(?,?,?,?,?,?)',
-                       (row[0], row[1], row[2], 1 if ok else 0, duration, time.time()))
+                       (row[0], row[1], row[2], 1 if status == 'completed' else 0, duration, time.time()))
             db.execute('DELETE FROM stock_route_outcomes WHERE id NOT IN '
                        '(SELECT id FROM stock_route_outcomes ORDER BY id DESC LIMIT ?)', (ROUTE_OUTCOMES_KEPT,))
             return row[0]
 
-    def route_history(self, limit=500):
-        """Recent outcomes for scoring: (agent, terms, ok). Keywords only; never shown to a model."""
+    def route_history(self, sid, limit=500):
+        """Outcomes this chat may learn from, scoped like notes: its own, plus chats of the same granted
+        project, plus chats sharing user memory when this chat does. (agent, terms, ok); never shown to a model."""
         with closing(self.open()) as db:
-            rows = db.execute('SELECT agent,terms,ok FROM stock_route_outcomes ORDER BY id DESC LIMIT ?', (limit,)).fetchall()
+            db.execute('BEGIN')
+            state = self.state(db, sid)
+            rows = db.execute(
+                'SELECT o.agent,o.terms,o.ok FROM stock_route_outcomes o LEFT JOIN stock_sessions s ON s.session=o.session '
+                'WHERE o.session=? OR (? IS NOT NULL AND s.project=?) OR (?=1 AND s.user_scope=1) '
+                'ORDER BY o.id DESC LIMIT ?',
+                (sid, state['project'], state['project'], 1 if state['user_scope'] else 0, limit)).fetchall()
         return [(agent, json.loads(terms), bool(ok)) for agent, terms, ok in rows]
 
     def route_stats(self):
