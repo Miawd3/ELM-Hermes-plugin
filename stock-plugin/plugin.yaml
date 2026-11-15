@@ -1,6 +1,6 @@
 name: elm
-version: 0.2.1-preview
-description: "Local scoped memory, reviewed facts, skills and opt-in query planning. No host patches."
+version: 0.3.0-preview
+description: "Local scoped memory for Hermes: reviewed notes, automatic recall (also as memory.provider: elm), skills and opt-in query planning. No host patches."
 author: ELM plugin contributors
 license: Apache-2.0
 kind: standalone
@@ -14,6 +14,8 @@ provides_hooks:
   - post_llm_call
   - post_compaction
   - on_session_delete
+  - subagent_start
+  - subagent_stop
 capabilities: []
 tags:
   - memory
