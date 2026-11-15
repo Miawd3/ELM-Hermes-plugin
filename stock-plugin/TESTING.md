@@ -27,16 +27,16 @@ Tick each line and note anything surprising. "Chat A" and "Chat B" are two new D
 | 2 | Open **Settings → Plugins → ELM** | Page explains the grant and shows a `hermes -p elmtest elm grant …` command |
 | 3 | In a terminal: `hermes -p elmtest elm grant`, pick chat A, answer `y` | "ELM granted to chat … until …" |
 | 4 | In chat A: `/elm status` (or Refresh the settings page) | Shows ELM on for this chat only |
-| 5 | `/elm save reference The test door code is 4411` | Saved, with an ID |
-| 6 | Ask in plain words: `What is the test door code?` | The model answers 4411 (the note was recalled) |
+| 5 | `/elm save reference The test lighthouse has 4411 steps` | Saved, with an ID |
+| 6 | Ask in plain words: `How many steps does the test lighthouse have?` | The model answers 4411 (the note was recalled) |
 | 7 | Send `thanks` | Normal reply; nothing about ELM |
 | 8 | Ask the model: `Please remember that my favourite colour is teal` | The model may propose a note; it is **not** saved until you approve |
 | 9 | `/elm pending`, then `/elm approve <id>` | The proposal becomes an approved note |
-| 10 | In chat B (not granted): `/elm search door` | Refused; chat B cannot see chat A's notes |
-| 11 | In chat A: `/compress`, then ask again `What is the test door code?` | Still answers 4411; `/elm status` still on |
+| 10 | In chat B (not granted): `/elm search lighthouse` | Refused; chat B cannot see chat A's notes |
+| 11 | In chat A: `/compress`, then ask again `How many steps does the test lighthouse have?` | Still answers 4411; `/elm status` still on |
 | 12 | Settings → Plugins → ELM: open the memory manager | Lists your notes; saving, approving, trashing and restoring work |
 | 13 | Settings → Plugins → ELM: turn on **Inline answer cards** | Preview card appears; nothing else changes |
-| 14 | In chat A: `/elm off`, then `/elm search door` | Refused with the grant hint. (The model may still remember 4411 from earlier messages in this chat; that is normal.) |
+| 14 | In chat A: `/elm off`, then `/elm search lighthouse` | Refused with the grant hint. (The model may still remember 4411 from earlier messages in this chat; that is normal.) |
 | 15 | `hermes -p elmtest elm grant` chat A again, then `/elm list` | Your notes are still there |
 | 16 | Delete chat A in Desktop, then `hermes -p elmtest elm doctor` | `records` and `chats with elm state` go down (chat A's private notes are gone) |
 | 17 | Optional: grant chat B with `--project Test`, save a `project` note, grant a new chat C with `--project Test`, search there | Chat C finds the project note; a chat without the project does not |

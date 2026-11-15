@@ -48,14 +48,16 @@ Unified Desktop/TUI/ACP chats report `local`, so they need `hermes elm grant` (o
   ungranted chat refused with grant hint; CLI grant; `/elm save`; automatic recall with DeepSeek answered
   4411 with no tool calls; trivial "thanks" gets a normal reply; other chat refused; `/elm off` blocks;
   re-grant keeps notes; `hermes sessions delete` purges chat-only notes (1 → 0) via `on_session_delete`.
-- Real compression (16 → 12 messages): grant stays on and the note is still searchable afterwards.
+- Real compression (10 → 8 messages): grant stays on, the note is still searchable, and the model still
+  answers 4411 afterwards. Deleting a compressed chat also purged its note and grant.
+- Test fact is now "The test lighthouse has 4411 steps" (was a "door code", which DeepSeek refused to
+  repeat as a credential). With this wording DeepSeek sometimes also calls `elm_memory` itself; automatic
+  recall still injects the note (3 of 6 terms match, 3 needed), so that is the model double-checking.
 
 ## Not verified yet
 
 - Compression that **rotates** the session ID (the `stock_session_alias` path): Hermes 0.23.1 compressed in
   place in the gateway test, so the ID never changed. Still unit-tested only.
-- Recall answer after compression: the note was injected, but DeepSeek refused to repeat a "door code"
-  (treated it as a credential). Fixture problem, not an ELM bug; TESTING.md should use a non-sensitive fact.
 - Desktop delete button itself (HTTP `DELETE /api/sessions/{id}`); it fires the same state-layer hook as the CLI delete.
 - UI steps 2, 12, 13 (settings page, memory manager, inline cards) in Hermes Desktop.
 - `hermes elm sessions` against a real `state.db` (unit-tested with a stub; it degrades to `hermes sessions list`).
