@@ -1,5 +1,5 @@
 name: elm
-version: 0.3.0-preview
+version: 0.4.0-preview
 description: "Local scoped memory for Hermes: reviewed notes, automatic recall (also as memory.provider: elm), skills and opt-in query planning. No host patches."
 author: ELM plugin contributors
 license: Apache-2.0

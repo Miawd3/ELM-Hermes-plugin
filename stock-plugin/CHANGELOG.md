@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0-preview — 2026-11-15
+
+- **New: auto mode.** `hermes elm auto on` (or answer yes in `hermes memory setup elm`) turns ELM on for
+  every Desktop/TUI/CLI chat in the profile, no per-chat grant. Notes are shared across those chats by
+  default (`--private` keeps them per chat). Never for messaging apps, cron, subagents or ACP chats; only
+  the owner's terminal can change it. `hermes elm auto off` turns auto-enabled chats off again; grants stay.
+- **New: `/elm private` / `/elm private off`.** A private chat neither reads shared notes nor shares its own
+  notes or routing history. Making a chat private never invalidates its grant.
+- `/elm off` / `/elm on` work per chat in auto mode (also in Desktop chats). `/elm status` shows
+  `auto_mode` and `shared_memory`; `hermes elm doctor` shows auto mode. Grant hints mention auto mode.
+- Database schema 5 (profile setting table; two chat columns). Existing data untouched.
+
 ## 0.3.0-preview — unreleased
 
 - **New:** ELM can run in Hermes's memory-provider slot (`memory.provider: elm`, or `hermes memory setup elm`).

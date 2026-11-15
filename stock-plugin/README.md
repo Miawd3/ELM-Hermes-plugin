@@ -3,7 +3,7 @@
 ELM gives Hermes a local, reviewable long-term memory. It is a normal Hermes plugin: no changes to Hermes itself.
 
 - **You decide what is remembered.** Save notes yourself, or let the model *propose* notes that you approve.
-- **Private by default.** Memory belongs to one chat unless you share it with a project or across your chats.
+- **On for all your chats, if you want.** One terminal command (`hermes elm auto on`) and every chat remembers what you saved in any other chat. Any chat can opt out with `/elm private`.
 - **Recalled automatically.** Relevant approved notes are added to the model's context when they match what you ask.
 - **Local.** Everything is stored on your computer, in your Hermes profile. Nothing is uploaded except what ends up in a chat you send to your model provider.
 
@@ -35,7 +35,7 @@ Hermes has one slot for an external long-term memory. To put ELM there:
 hermes memory setup elm        # or: hermes config set memory.provider elm
 ```
 
-Restart Hermes. `hermes elm doctor` then says `Memory slot: ELM is the memory provider`, and chats show
+Setup also offers to turn ELM on for all your chats (auto mode, below). Restart Hermes. `hermes elm doctor` then says `Memory slot: ELM is the memory provider`, and chats show
 **🧠 ELM — recalled N memories** when a note is added. Grants, `/elm` commands and privacy rules are
 the same in both modes, and a note is never added twice. Keep the plugin enabled
 (`hermes plugins enable elm`): `/elm`, `hermes elm grant` and routing come from the plugin side.
@@ -43,9 +43,31 @@ Hermes's own built-in memory keeps working next to it. To go back:
 `hermes config set memory.provider builtin`, then restart Hermes.
 Only one external memory provider can be active, so this replaces another one (for example Honcho or mem0) if you had it.
 
-## Turn ELM on for a chat
+## Turn ELM on
 
-ELM never turns itself on. You enable it for **one chat at a time**.
+ELM never turns itself on, and the AI can never turn it on. You choose, from a terminal on your computer:
+
+### For all your chats (recommended): auto mode
+
+```sh
+hermes elm auto on
+```
+
+Every Desktop, TUI and CLI chat in this profile then has ELM, and a note saved in one chat is
+remembered in all of them, like a normal memory. Restart Hermes if a chat is already open.
+Never included: messaging apps (Telegram, Discord…), cron jobs, subagents and editor-connected (ACP) chats.
+
+| In a chat | Effect |
+|---|---|
+| `/elm private` | This chat stops reading shared notes; new notes and routing history from here stay in this chat. `/elm private off` undoes it. |
+| `/elm off` / `/elm on` | Switch ELM off or back on for this chat only. |
+| `/elm status` | Shows `auto_mode` and `shared_memory` for this chat. |
+
+`hermes elm auto` shows the setting; `hermes elm auto on --private` keeps notes per chat instead of
+sharing them; `hermes elm auto off` turns off every chat that was on only because of auto mode
+(chats you granted yourself keep their grant; saved notes are kept).
+
+### For one chat at a time
 
 **Desktop (and TUI chats served by the Desktop/gateway):** Hermes cannot tell these apps apart, so you grant access from a terminal on the same computer. The model can never grant access.
 
@@ -70,7 +92,8 @@ A grant lasts 24 hours by default (`--hours` up to 168). Turn it off with `/elm 
 | Find something | `/elm search staging server`, or just ask — matching notes are recalled automatically |
 | Review model proposals | `/elm pending`, then `/elm approve <id>` or `/elm trash <id>` |
 | Browse / edit | `/elm list`, `/elm edit <id> <new text>`, `/elm restore <id>`, or the memory manager in **Settings → Plugins → ELM** |
-| Share with other chats | Grant with `--project NAME` (same project) or `--user` (your shared user facts) |
+| Share with other chats | Auto mode shares by default; otherwise grant with `--project NAME` (same project) or `--user` (your shared user facts) |
+| Keep one chat to itself | `/elm private` |
 | Keep a record of the conversation | Grant with `--capture` (saves finished turns as plain text on this computer) |
 | See every command | `/elm help` |
 
