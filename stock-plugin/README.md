@@ -74,6 +74,35 @@ A grant lasts 24 hours by default (`--hours` up to 168). Turn it off with `/elm 
 
 Model choices for the optional search planner and organizer: **Settings → Models → Auxiliary → ELM Search / ELM Organizer**.
 
+## Optional: memory-aware agent routing
+
+When Hermes hands work to a subagent (`delegate_task`), ELM can choose **which agent** does it and
+learn from how it went. You name your agents; each is a model or one of your Hermes profiles
+(a profile brings its own model, skills, SOUL.md and its own ELM memory):
+
+```yaml
+# config.yaml of the profile (or: hermes config set delegation.backends.elm.agents.quick.model ...)
+delegation:
+  backend: elm
+  backends:
+    elm:
+      default: quick          # used when ELM has nothing better
+      agents:
+        quick: {description: "Small, fast tasks", provider: deepseek, model: deepseek-v4-flash}
+        deep:  {description: "Hard reasoning", provider: deepseek, model: deepseek-v4-flash, reasoning_effort: high}
+        coder: {description: "Code changes in my repos", profile: coder}
+```
+
+Restart Hermes (or `/new`). The model now sees your agent names and descriptions and may pick one
+per task. If it doesn't, ELM picks the agent that succeeded most on similar earlier tasks, else your
+`default`, else the chat's own model. `hermes elm routes` shows your agents and how each did.
+
+What ELM remembers for routing: the agent's name, a few keywords of the task, whether it finished,
+and how long it took. Nothing else, never the results, and only for chats where ELM is on. Deleting
+a chat deletes its routing history. Set `learn: false` to only use your choice or the default.
+The ELM plugin must be enabled for routing (`hermes plugins enable elm`). Nous's official
+*Advanced Delegation* plugin is an alternative backend without memory; only one backend is active.
+
 ## What happens when…
 
 - **A long chat is compressed:** ELM keeps the chat's access and its private notes, even if Hermes moves the chat to a new session ID.

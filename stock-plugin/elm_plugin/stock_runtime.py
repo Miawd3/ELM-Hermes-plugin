@@ -330,6 +330,23 @@ class Runtime:
         except Exception:
             return None
 
+    def subagent_started(self,*,parent_session_id='',child_session_id='',child_goal='',**kwargs):
+        """Link a child the ELM routing backend chose to its parent chat - only when ELM is on there."""
+        try:
+            if not (child_session_id and isinstance(child_goal, str) and child_goal.strip()):
+                return None
+            sid = self.sid(parent_session_id)  # raises unless the parent chat is granted / on
+            self.store.route_started(sid, child_session_id, child_goal, content_terms(child_goal))
+        except Exception:
+            return None
+
+    def subagent_stopped(self,*,child_session_id='',child_status=None,duration_ms=0,**kwargs):
+        try:
+            if child_session_id:
+                self.store.route_finished(child_session_id, child_status == 'completed', duration_ms)
+        except Exception:
+            return None
+
     def after_turn(self,*,session_id='',user_message='',assistant_response='',**kwargs):
         try:
             if self.provider_selected():
@@ -357,6 +374,14 @@ def register_stock(ctx):
     ctx.register_hook('post_llm_call',runtime.after_turn)
     ctx.register_hook('post_compaction',runtime.after_compaction)
     ctx.register_hook('on_session_delete',runtime.session_deleted)
+    ctx.register_hook('subagent_start',runtime.subagent_started)
+    ctx.register_hook('subagent_stop',runtime.subagent_stopped)
+    try:
+        from .routing import ElmDelegationProvider
+    except ImportError:  # Hermes without pluggable delegation: no ELM routing backend
+        ElmDelegationProvider = None
+    if ElmDelegationProvider is not None and hasattr(ctx, 'register_delegation_provider'):
+        ctx.register_delegation_provider(ElmDelegationProvider())  # selected with delegation.backend: elm
     from . import cli as elm_cli
     ctx.register_cli_command(name='elm',help='Grant ELM memory to one chat, revoke it, or list recent chats',
                              setup_fn=lambda parser:elm_cli.setup_cli(parser,runtime.store),description=elm_cli.__doc__)

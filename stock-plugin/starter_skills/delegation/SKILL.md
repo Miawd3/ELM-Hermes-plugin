@@ -10,7 +10,7 @@ Delegate when independent work can proceed usefully in parallel. Keep a small ta
 
 Give each worker an outcome, necessary context, source locations, constraints, allowed side effects and an acceptance check. State ownership of files or interfaces so two workers do not overwrite the same work. Share relevant corrections promptly.
 
-Choose available models and effort using demonstrated task fit, latency and cost, not an invented universal ranking. Do not assume a subscription funds API calls. Stay within approved budgets and tool access; delegation cannot expand authorization or remove confirmation requirements.
+Choose available models and effort using demonstrated task fit, latency and cost, not an invented universal ranking. When `delegate_task` offers an `agent` parameter (ELM routing), pick the listed agent whose description fits the task; leave it out when unsure and ELM chooses from how similar tasks went before. Write each goal in plain, specific words so that history stays useful. Do not assume a subscription funds API calls. Stay within approved budgets and tool access; delegation cannot expand authorization or remove confirmation requirements.
 
 Integrate results against the overall request. Verify important claims and actual artifacts, especially when a worker stopped after a partial change. Independent review should inspect the implementation and failure cases rather than simply repeat its author's conclusion.
 

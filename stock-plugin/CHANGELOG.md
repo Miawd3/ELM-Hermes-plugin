@@ -7,7 +7,13 @@
   capture through `sync_turn`, and compression through `on_session_switch`. Same grant rules as before;
   subagents, cron and messaging chats never recall. The general hooks step aside in this mode, so a note
   is never injected twice. Without the setting, ELM works exactly as in 0.2.1.
-- `hermes elm doctor` shows whether ELM is in the memory slot.
+- **New:** memory-aware agent routing, Hermes delegation backend `elm` (`delegation.backend: elm`).
+  Name agents (model routes or Hermes profiles) under `delegation.backends.elm.agents`; the model may
+  pick one per `delegate_task` task, otherwise ELM picks the agent that did best on similar past tasks,
+  then `default`, then the parent's model. Remembers only agent, goal keywords, success and duration,
+  only for chats with ELM on; purged with the chat. `hermes elm routes` shows agents and results.
+  Database schema 3 (adds three routing tables; existing data untouched).
+- `hermes elm doctor` shows whether ELM is in the memory slot, and counts routing outcomes.
 
 ## 0.2.1-preview — 2026-11-14
 

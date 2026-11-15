@@ -40,6 +40,8 @@ Tick each line and note anything surprising. "Chat A" and "Chat B" are two new D
 | 15 | `hermes -p elmtest elm grant` chat A again, then `/elm list` | Your notes are still there |
 | 16 | Delete chat A in Desktop, then `hermes -p elmtest elm doctor` | `records` and `chats with elm state` go down (chat A's private notes are gone) |
 | 17 | Optional: grant chat B with `--project Test`, save a `project` note, grant a new chat C with `--project Test`, search there | Chat C finds the project note; a chat without the project does not |
+| 18 | Optional, memory slot: `hermes -p elmtest memory setup elm`, restart Hermes, repeat steps 3–6 in a new chat | `hermes -p elmtest elm doctor` says `Memory slot: ELM is the memory provider`; the chat shows **🧠 ELM — recalled 1 memory** and the model answers 4411 |
+| 19 | Optional, routing: set up two agents as in the README (*memory-aware agent routing*), restart, grant a new chat, then ask: `Use delegate_task once with agent "careful" to explain ocean tides in two sentences`, then the same request with a slightly different goal and *without* an agent | `hermes -p elmtest elm routes` lists `careful: 2/2 succeeded` (ELM sent the second task to `careful`, not the default) |
 
 ## 3. Report
 

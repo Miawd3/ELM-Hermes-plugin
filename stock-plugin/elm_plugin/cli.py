@@ -131,11 +131,46 @@ def doctor(store):
     return 0
 
 
+def routes(store):
+    """Routing backend status and per-agent results (counts only: no task text, keywords or chat IDs)."""
+    try:
+        from hermes_cli.config import load_config_readonly
+        delegation = load_config_readonly().get('delegation') or {}
+    except Exception:
+        delegation = {}
+    from .routing import BACKEND, configured_agents
+    backends = delegation.get('backends') if isinstance(delegation.get('backends'), dict) else {}
+    settings = backends.get(BACKEND) if isinstance(backends.get(BACKEND), dict) else {}
+    agents = configured_agents(settings)
+    active = str(delegation.get('backend') or 'default').lower() == BACKEND
+    print('Routing: ELM is the delegation backend' if active
+          else f"Routing: not active (delegation.backend is {delegation.get('backend') or 'default'}; set it to {BACKEND})")
+    if not agents:
+        print('  No agents configured under delegation.backends.elm.agents (see README).')
+    for name, info in agents.items():
+        target = 'profile ' + str(info['route']['profile']) if 'profile' in info['route'] else \
+            ' / '.join(str(info['route'][k]) for k in ('provider', 'model') if k in info['route']) or 'parent model'
+        mark = ' (default)' if settings.get('default') == name else ''
+        print(f'  {name}{mark}: {target}')
+    if settings.get('learn', True) is False:
+        print('  Learning is off (learn: false): ELM uses your choice or the default only.')
+    stats = store.route_stats()
+    if stats:
+        print('Results remembered (chats with ELM on only):')
+        for row in stats:
+            print(f"  {row['agent']}: {row['succeeded']}/{row['runs']} succeeded, ~{row['avg_seconds']}s each")
+    else:
+        print('No results remembered yet.')
+    return 0
+
+
 def run(args, store_factory):
     from hermes_constants import display_hermes_home
     store = store_factory()
     if args.elm_command == 'doctor':
         return doctor(store)
+    if args.elm_command == 'routes':
+        return routes(store)
     if args.elm_command == 'sessions':
         rows = _listed(args.limit)
         if rows is None:
@@ -183,6 +218,7 @@ def setup_cli(parser, store_or_factory):
     revoke = subs.add_parser('revoke', help='Turn ELM off for one chat (saved memories are kept)')
     revoke.add_argument('session', nargs='?', help='Chat ID; omit to pick from recent chats')
     subs.add_parser('doctor', help='Show versions, storage health and counts (safe for bug reports)')
+    subs.add_parser('routes', help='Show ELM agent routing: configured agents and how they did')
     sessions = subs.add_parser('sessions', help='List recent chats with their IDs')
     sessions.add_argument('--limit', type=int, default=15)
 
