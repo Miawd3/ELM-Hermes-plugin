@@ -27,7 +27,9 @@ hermes plugins validate .
 | `hermes plugins validate` | passed; no private-import warnings (0.1.0 had 187) |
 | Unit + regression suites | 478 tests, all pass; 22 skipped (optional tokenizer vocabularies not supplied) |
 | `native_contract`, `native_explicit_contract` | pass: real Hermes discovery of `plugins/elm-wiki`, `MemoryManager`, `elm_context`/`elm_read`/`elm_status`, background recall |
-| Disposable profile | `setup_profile.py new` → `hermes plugins enable elm-wiki` → `memory.provider elm-wiki` → `hermes memory status`: available |
+| `native_episode_discovery`, `native_forgetting_discovery` | pass: episode capture, search/read and forgetting through Hermes's memory manager |
+| `native_measured_budget` | skipped (needs `ELM_TEST_VOCAB`) |
+| Disposable profile | `hermes plugins install "<repo>#elm"` → installs as `plugins/elm-wiki`; `setup_profile.py new` → `memory.provider elm-wiki` → `hermes memory status`: available |
 | Other `native_*` harnesses (5) | **not run**: they require a git checkout of Hermes at the old pin `b200f5bc` |
 
 Not established: model tool choice, answer quality, Linux/macOS on this release, measured-budget mode with a

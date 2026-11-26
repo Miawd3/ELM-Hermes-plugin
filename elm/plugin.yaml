@@ -4,7 +4,7 @@ description: "Experimental ELM Wiki: memory kept as reviewable local Markdown fi
 author: ELM plugin contributors
 license: Apache-2.0
 kind: standalone
-requires_hermes: ">=0.22.7"
+requires_hermes: ">=0.23.1"
 python_dependencies: []
 requires_env: []
 provides_tools: []
