@@ -1,6 +1,6 @@
-name: elm
-version: 0.1.0-rc40
-description: "Experimental authenticated scoped memory and review UI; requires the accompanying pinned Hermes host patch. Production model extraction is disabled."
+name: elm-wiki
+version: 0.2.0-experimental
+description: "Experimental ELM Wiki: memory kept as reviewable local Markdown files with a derived SQLite FTS5 index, bounded source-linked recall and exact source expansion. Public Hermes plugin API only; explicit-only recall by default."
 author: ELM plugin contributors
 license: Apache-2.0
 kind: standalone

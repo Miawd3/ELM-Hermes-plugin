@@ -24,9 +24,21 @@ def _regular_path(path, root):
         raise ValueError('ELM starter skill path is invalid')
 
 
-def _read_skill(root, name):
-    import hermes_yaml as yaml
+def _frontmatter(header):
+    """Strict `key: value` lines only; the bundled skills need nothing more (no Hermes YAML import)."""
+    values = {}
+    for line in header.split('\n'):
+        key, sep, value = line.partition(':')
+        key, value = key.strip(), value.strip()
+        if not sep or not key or key in values:
+            raise ValueError('ELM starter skill frontmatter is invalid')
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in '"\'':
+            value = value[1:-1]
+        values[key] = value
+    return values
 
+
+def _read_skill(root, name):
     path = root / name / 'SKILL.md'
     _regular_path(path, root)
     if path.stat().st_size > MAX_SKILL_BYTES:
@@ -39,7 +51,7 @@ def _read_skill(root, name):
     if not text.startswith('---\n') or '\n---\n' not in text[4:]:
         raise ValueError('ELM starter skill frontmatter is missing')
     header, body = text[4:].split('\n---\n', 1)
-    frontmatter = yaml.safe_load(header)
+    frontmatter = _frontmatter(header)
     if not isinstance(frontmatter, dict) or set(frontmatter) != {'name', 'description', 'license'}:
         raise ValueError('ELM starter skill frontmatter is invalid')
     description = frontmatter['description']

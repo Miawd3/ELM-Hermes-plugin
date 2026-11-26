@@ -1,5 +1,13 @@
 # Source provenance
 
+## 0.2.0-experimental (2026-11-26)
+
+Derived from public commit `25100b248790813861282e71e376d371264c1787` (`elm/`, rc40). Removed every module,
+test, UI page and document that depended on the patched Hermes host or on private Hermes internals; restored
+the original file-based `ElmMemoryProvider` as the registered provider under the name `elm-wiki`; replaced
+`agent.memory_context.build_memory_context_block` with ELM's own `memory_fence` and `hermes_yaml` with a
+strict local frontmatter parser. The bundled engine (`engine/`) is unchanged. Sections below are historical.
+
 ## Current isolated stat-refresh candidate
 
 This source-only candidate derives from the accepted **typed policy-v8** tree `68d30cd3cc78714baf4b17a3ebf30a5f9ba999e365eeed5f1d6b364d6c0252c7`, whose original manifest SHA-256 is `7965c21585ac65762539356f731176e4183dd108039ef182b2ff070a7c6d8c56`. It fixes the pre-existing equal-content/changed-mtime ordinary-sync availability trap in `index_one`: validated unchanged bytes now refresh only derived mtime/size while preserving content/section/record identity. Policy/schema stays 8; no source admission or read guard is weakened. See `docs/STAT_REFRESH.md`. Current RED/GREEN, real stock native refusal/recovery, source seals and prescribed full-run evidence are external under `stat-refresh-evidence/`. Prior qualification remains attributable to prior bytes, not automatically transferred. Root SOURCE_MANIFEST binds this candidate. No live/canonical/profile, host, frozen source, controller/benchmark or public repository is modified.

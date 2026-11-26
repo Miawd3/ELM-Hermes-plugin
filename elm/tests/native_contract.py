@@ -30,7 +30,7 @@ def main():
         os.environ["HERMES_ENABLE_PROJECT_PLUGINS"] = "0"
         os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
         (home / "config.yaml").write_text("memory:\n  provider: elm\nplugins:\n  isolation: in_process\n", encoding="utf-8")
-        installed = home / "plugins/elm"
+        installed = home / "plugins/elm-wiki"
         shutil.copytree(PLUGIN, installed, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".git", "tests"))
         root = base / "memory"
         engine(root, "init", "--project", "orion")
@@ -42,24 +42,24 @@ def main():
         from plugins.memory import find_provider_dir, list_memory_provider_names, load_memory_provider
         from agent.memory_manager import MemoryManager
 
-        assert "elm" in list_memory_provider_names()
-        assert find_provider_dir("elm").resolve() == installed.resolve()
-        provider = load_memory_provider("elm")
+        assert "elm-wiki" in list_memory_provider_names()
+        assert find_provider_dir("elm-wiki").resolve() == installed.resolve()
+        provider = load_memory_provider("elm-wiki")
         assert isinstance(provider, MemoryProvider)
-        assert provider.name == "elm"
+        assert provider.name == "elm-wiki"
         assert not provider.is_available()
         # Historical background contract is opt-in; default safety has separate tests.
         provider.save_config({"budget_mode": "legacy-estimate", "root": str(root), "project": "orion", "mode": "read-only", "budget": 700,
                               "recall_mode": "legacy-background"}, str(home))
         assert provider.is_available()
         assert provider.get_status_config({})["mode"] == "read-only"
-        another = load_memory_provider("elm")
+        another = load_memory_provider("elm-wiki")
         assert another is not provider
 
         manager = MemoryManager()
         manager.add_provider(provider)
         manager.initialize_all(session_id="native-fresh", platform="cli")
-        assert manager.get_provider("elm") is provider
+        assert manager.get_provider("elm-wiki") is provider
         schemas_before = provider.get_tool_schemas()
         assert all(manager.has_tool(name) for name in ("elm_context", "elm_read", "elm_status", "elm_note"))
         output = manager.handle_tool_call("elm_context", {"query": "amber canaries signed rollback"})

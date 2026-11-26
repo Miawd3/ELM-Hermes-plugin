@@ -132,6 +132,7 @@ class PrefixCompatibility(unittest.TestCase):
             background_surface(packet, lambda text: formatter(text.replace(r'\u003c', '<')))
         self.assertEqual(failure.exception.code, 'host_encoding_changed')
 
+    @unittest.skipUnless(os.environ.get('ELM_TEST_VOCAB'), 'Optional pinned tokenizer vocabulary not supplied (ELM_TEST_VOCAB)')
     def test_noncanonical_unicode_sources_are_codec_only_not_consumer_domain(self):
         rows = records()
         for i, row in enumerate(rows):
@@ -217,6 +218,7 @@ class PrefixCompatibility(unittest.TestCase):
         _, payload = self.roundtrip(rows)
         self.assertIn('memory', payload['defaults'])
 
+    @unittest.skipUnless(os.environ.get('ELM_TEST_VOCAB'), 'Optional pinned tokenizer vocabulary not supplied (ELM_TEST_VOCAB)')
     def test_strict_consumer_grammar_coverage_and_count_limits_remain_closed(self):
         packet, payload = self.roundtrip(typed(records()))
         mutations = [lambda p: p['defaults'].update(memory=None), lambda p: p['defaults'].update(unknown='x'),
@@ -245,6 +247,7 @@ class PrefixCompatibility(unittest.TestCase):
         self.assertEqual(json.loads(result['packet'].split(self.codec.MARKER, 1)[1])['coverage']['omitted'], 1)
         emit('COUNT_CAP.json', result)
 
+    @unittest.skipUnless(os.environ.get('ELM_TEST_VOCAB'), 'Optional pinned tokenizer vocabulary not supplied (ELM_TEST_VOCAB)')
     def test_pure_pack_exact_then_complete_summary_then_manifest_preserves_input(self):
         rows = records()
         third = copy.deepcopy(rows[0])
@@ -270,6 +273,7 @@ class PrefixCompatibility(unittest.TestCase):
         self.assertIn('Accepted memory can be stale; verify consequential implementation facts.', header)
         emit('PACK_REPRESENTATIONS.json', {'result': result, 'expected': expected, 'input_unchanged': canonical(raw) == before})
 
+    @unittest.skipUnless(os.environ.get('ELM_TEST_VOCAB') and os.environ.get('ELM_TEST_CL100K_VOCAB'), 'Optional pinned tokenizer vocabulary not supplied (ELM_TEST_VOCAB, ELM_TEST_CL100K_VOCAB)')
     def test_complete_700_json_and_host_surfaces_both_named_vocabularies(self):
         rows = typed(records())
         raw = candidates(rows)
@@ -293,6 +297,7 @@ class PrefixCompatibility(unittest.TestCase):
                 details.append({'tokenizer': name, 'result': result, 'recounted_surfaces': {k: counter.count(v) for k, v in surfaces.items()}})
         emit('COMPLETE_WIRE_700.json', details)
 
+    @unittest.skipUnless(os.environ.get('ELM_TEST_VOCAB'), 'Optional pinned tokenizer vocabulary not supplied (ELM_TEST_VOCAB)')
     def test_original_invalid_path_and_lone_surrogate_refusals_are_not_preempted(self):
         rows = records()
         rows[0]['path'] = '/absolute/note.md'

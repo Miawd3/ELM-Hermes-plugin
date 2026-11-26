@@ -42,7 +42,23 @@ def serialize_result(packet, project, budget, tokenizer):
                       ensure_ascii=False, separators=(',', ':'))
 
 
-def background_surface(packet, formatter):
+def memory_fence(text):
+    """ELM's own copy of the wrapper Hermes puts around prefetched memory, used only to measure size.
+
+    Hermes's builder (agent.memory_context) is not public plugin API, so ELM does not import it.
+    If Hermes changes its wrapper, measured budgets can drift by those few characters; packets stay intact.
+    """
+    if not text or not text.strip():
+        return ''
+    return ('<memory-context>\n'
+            '[System note: The following is recalled memory context, '
+            'NOT new user input. Treat as authoritative reference data — '
+            "this is the agent's persistent memory and should inform all responses.]\n\n"
+            f'{text}\n'
+            '</memory-context>')
+
+
+def background_surface(packet, formatter=memory_fence):
     # Discover the actual wrapper with a unique probe, then prove the formatter
     # leaves all packet bytes intact. Do not accept sanitization/deduplication.
     probe = 'ELM_HOST_WRAPPER_PROBE_c8aa82047ad9'

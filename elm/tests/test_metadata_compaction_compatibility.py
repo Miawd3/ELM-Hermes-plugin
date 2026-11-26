@@ -184,6 +184,7 @@ class MetadataCompatibility(unittest.TestCase):
         duplicate = packet.replace('"defaults":{', '"defaults":{"status":"injected",', 1)
         self.assertIsNone(dictionary_source_count(duplicate))
 
+    @unittest.skipUnless(os.environ.get('ELM_TEST_VOCAB') and os.environ.get('ELM_TEST_CL100K_VOCAB'), 'Optional pinned tokenizer vocabulary not supplied (ELM_TEST_VOCAB, ELM_TEST_CL100K_VOCAB)')
     def test_fixed_full_wire_700_boundary_both_named_encodings_and_wrappers(self):
         rows = []
         before = canonical(self.candidates)
@@ -203,6 +204,7 @@ class MetadataCompatibility(unittest.TestCase):
                          'full_record_count': result['source_count'], 'exact_semantics': True})
         emit('CROSS_ENCODING.json', rows)
 
+    @unittest.skipUnless(os.environ.get('ELM_TEST_VOCAB'), 'Optional pinned tokenizer vocabulary not supplied (ELM_TEST_VOCAB)')
     def test_production_pack_exact_then_complete_summary_then_manifest_no_mutation(self):
         candidates = copy.deepcopy(self.candidates)
         candidates[0]['text'] = 'Unfitting body alpha. '*2500

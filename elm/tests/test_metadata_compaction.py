@@ -43,6 +43,7 @@ def emit(name, payload):
 
 
 class FullWireBoundary(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get('ELM_TEST_VOCAB'), 'Optional pinned tokenizer vocabulary not supplied (ELM_TEST_VOCAB)')
     def test_three_complete_records_fit_700_with_exact_decoded_semantics(self):
         fixture, expected, candidates = load_fixture()
         self.assertEqual(len(expected), 3)

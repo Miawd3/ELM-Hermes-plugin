@@ -67,7 +67,7 @@ def settings(home, binding, name, **extra):
 def setup(base):
     home = base/'profile'; home.mkdir()
     root = base/'store'
-    installed = home/'plugins/elm'
+    installed = home/'plugins/elm-wiki'
     shutil.copytree(PLUGIN, installed, ignore=shutil.ignore_patterns('__pycache__', '*.pyc', 'tests', '.git'))
     (home/'config.yaml').write_text('memory:\n  provider: elm\nplugins:\n  isolation: in_process\n')
     binding = command([sys.executable, '-B', str(installed/'manage.py'), 'init', '--budget-mode', 'legacy-estimate',
@@ -81,15 +81,15 @@ def setup(base):
 
 def phase(name, base):
     home, root = base/'profile', base/'store'
-    installed = home/'plugins/elm'
+    installed = home/'plugins/elm-wiki'
     os.environ.update(HOME=str(base), HERMES_HOME=str(home), HERMES_RUNTIME_DIR=str(base/'runtime'),
         HERMES_ENABLE_PROJECT_PLUGINS='0', HERMES_DISABLE_LAZY_INSTALLS='1', PYTHONDONTWRITEBYTECODE='1')
     sys.path[:0] = [str(HOST), str(installed)]
     from plugins.memory import load_memory_provider, find_provider_dir
     from agent.memory_manager import MemoryManager
     binding = json.loads((home/'elm.json').read_text())
-    assert find_provider_dir('elm').resolve() == installed.resolve()
-    p = load_memory_provider('elm'); m = MemoryManager(); m.add_provider(p)
+    assert find_provider_dir('elm-wiki').resolve() == installed.resolve()
+    p = load_memory_provider('elm-wiki'); m = MemoryManager(); m.add_provider(p)
     # Stock discovery namespaces plugin imports. Resolve its actual module
     # family rather than mixing two nominally identical exception classes.
     family = p.__class__.__module__.rsplit('.', 1)[0]
@@ -98,7 +98,7 @@ def phase(name, base):
     CaptureRefused = importlib.import_module(family+'.episode_capture').CaptureRefused
     EpisodeInspection = importlib.import_module(family+'.episode_inspect').EpisodeInspection
     m.initialize_all('lifecycle', hermes_home=str(home), platform='cli', agent_context='primary')
-    assert m.get_provider('elm') is p and p._episode_capture is not None
+    assert m.get_provider('elm-wiki') is p and p._episode_capture is not None
     assert all(m.has_tool(t) for t in ('elm_episode_search', 'elm_episode_read', 'elm_context'))
     assert not m.has_tool('elm_episode_forget')
     inspector = lambda: EpisodeInspection(home, root_id=binding['root_id'], project='orion')

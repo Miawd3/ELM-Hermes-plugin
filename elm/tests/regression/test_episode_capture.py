@@ -267,7 +267,7 @@ class RealProviderHooks(unittest.TestCase):
         manager = MemoryManager()
         manager.add_provider(provider)
         manager.initialize_all("session1", hermes_home=str(self.home), platform="cli", agent_context=context)
-        self.assertIs(manager.get_provider("elm"), provider)
+        self.assertIs(manager.get_provider("elm-wiki"), provider)
         self.addCleanup(manager.shutdown_all)
         return provider, manager
 
