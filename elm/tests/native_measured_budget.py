@@ -61,7 +61,7 @@ def main():
         home.mkdir()
         os.environ.update(HERMES_HOME=str(home), HERMES_RUNTIME_DIR=str(home / "runtime"),
                           HERMES_ENABLE_PROJECT_PLUGINS="0", PYTHONDONTWRITEBYTECODE="1")
-        installed = home / "plugins/elm"
+        installed = home / "plugins/elm-wiki"
         shutil.copytree(PLUGIN, installed, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".git", "tests"))
         root = base / "memory"
         engine(root, "init", "--project", "orion")
@@ -77,8 +77,8 @@ def main():
         from agent.memory_context import build_memory_context_block
         from agent.turn_context import compose_multimodal_context_part, compose_user_api_content
         from plugins.memory import find_provider_dir, list_memory_provider_names, load_memory_provider
-        assert "elm" in list_memory_provider_names()
-        assert find_provider_dir("elm").resolve() == installed.resolve()
+        assert "elm-wiki" in list_memory_provider_names()
+        assert find_provider_dir("elm-wiki").resolve() == installed.resolve()
         results = []
 
         def setup(budget, *, receipt=True, chars=100_000):
@@ -86,7 +86,7 @@ def main():
                 "memory:\n  provider: elm\n  prefetch_spill_enabled: true\n"
                 "plugins:\n  isolation: in_process\n"
                 f"hooks:\n  output_spill:\n    enabled: true\n    max_chars: {chars}\n", encoding="utf-8")
-            provider = load_memory_provider("elm")
+            provider = load_memory_provider("elm-wiki")
             assert isinstance(provider, MemoryProvider)
             provider.save_config({"budget_mode": "measured", "tokenizer": "o200k_base",
                                   "tokenizer_vocab": str(vocab), "root": str(root), "project": "orion",
@@ -97,7 +97,7 @@ def main():
             assert frozen["max_chars"] == chars and frozen["enabled"] is True, frozen
             kwargs = {"elm_prefetch_max_chars": frozen["max_chars"]} if receipt else {}
             manager.initialize_all(session_id="measured-test", platform="cli", **kwargs)
-            assert manager.get_provider("elm") is provider and manager.has_tool("elm_context")
+            assert manager.get_provider("elm-wiki") is provider and manager.has_tool("elm_context")
             return manager, provider
 
         def prefetch(manager, provider):

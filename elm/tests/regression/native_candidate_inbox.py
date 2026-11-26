@@ -16,13 +16,13 @@ TEXT = 'I do not prefer red. Someone else said "prefer red" as a hypothetical.'
 
 def worker(name, base):
     home, root = base / 'profile', base / 'store'
-    installed = home / 'plugins/elm'
+    installed = home / 'plugins/elm-wiki'
     os.environ.update(HOME=str(base), HERMES_HOME=str(home), HERMES_RUNTIME_DIR=str(base / 'runtime'),
                       HERMES_ENABLE_PROJECT_PLUGINS='0', HERMES_DISABLE_LAZY_INSTALLS='1', PYTHONDONTWRITEBYTECODE='1')
     sys.path[:0] = [str(existing.HOST), str(installed)]
     from plugins.memory import load_memory_provider
     from agent.memory_manager import MemoryManager
-    manager = MemoryManager(); provider = load_memory_provider('elm'); manager.add_provider(provider)
+    manager = MemoryManager(); provider = load_memory_provider('elm-wiki'); manager.add_provider(provider)
     manager.initialize_all('inbox-lifecycle', hermes_home=str(home), platform='cli', agent_context='primary')
     family = provider.__class__.__module__.rsplit('.', 1)[0]
     module = importlib.import_module(family + '.candidate_inbox')

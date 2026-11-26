@@ -73,7 +73,7 @@ class AuditBase(unittest.TestCase):
         self.configure_retrieval(binding, enabled=enable, **retrieval_options)
         manager = MemoryManager(); manager.add_provider(provider)
         manager.initialize_all('audit_session', hermes_home=str(self.home), platform='cli', agent_context='primary')
-        self.assertIs(manager.get_provider('elm'), provider)
+        self.assertIs(manager.get_provider('elm-wiki'), provider)
         self.addCleanup(manager.shutdown_all)
         self.provider, self.manager = provider, manager
         return provider, manager

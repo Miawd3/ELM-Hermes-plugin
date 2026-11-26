@@ -32,13 +32,13 @@ with tempfile.TemporaryDirectory(prefix='elm-native-episode-') as temp:
     os.environ.update(HOME=str(base), HERMES_HOME=str(home), HERMES_RUNTIME_DIR=str(base/'runtime'),
                       HERMES_ENABLE_PROJECT_PLUGINS='0', PYTHONDONTWRITEBYTECODE='1')
     (home/'config.yaml').write_text('memory:\n  provider: elm\nplugins:\n  isolation: in_process\n')
-    installed = home/'plugins/elm'
+    installed = home/'plugins/elm-wiki'
     shutil.copytree(PLUGIN, installed, ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '.git', 'tests'))
     engine(root, 'init', '--project', 'orion')
     from plugins.memory import load_memory_provider, find_provider_dir
     from agent.memory_manager import MemoryManager
-    assert find_provider_dir('elm').resolve() == installed.resolve()
-    provider = load_memory_provider('elm')
+    assert find_provider_dir('elm-wiki').resolve() == installed.resolve()
+    provider = load_memory_provider('elm-wiki')
     provider.save_config({"budget_mode": "legacy-estimate", 'root':str(root), 'project':'orion', 'mode':'read-only', 'budget':700}, str(home))
     binding = json.loads((home/'elm.json').read_text())
     for name, extra in [('capture', {}), ('recall', {'budget':1200})]:
@@ -72,7 +72,7 @@ with tempfile.TemporaryDirectory(prefix='elm-native-episode-') as temp:
     assert 'cobalt telescope' not in context.lower() and 'ELM-EPISODE' not in context
     manager.shutdown_all()
     assert before==digest(root)
-    other=load_memory_provider('elm'); second=MemoryManager(); second.add_provider(other)
+    other=load_memory_provider('elm-wiki'); second=MemoryManager(); second.add_provider(other)
     second.initialize_all('native_fresh', hermes_home=str(home), platform='cli', agent_context='primary')
     restarted=json.loads(second.handle_tool_call('elm_episode_read', {'locator':loc}))
     assert restarted==read

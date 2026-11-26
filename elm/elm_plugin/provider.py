@@ -17,7 +17,7 @@ from .storage import adopt, load_binding, atomic_json, RECALL_MODES
 from .schemas import schemas, validate, BY_NAME, intent_flags
 from .delivery import prepare_recall
 from .token_budget import TokenCounter, BUDGET_MODES
-from .measured_context import measured_context, background_surface, legacy_accounting
+from .measured_context import measured_context, background_surface, legacy_accounting, memory_fence
 from .episode_capture import EpisodeCapture, CaptureRefused
 from .episode_recall import EpisodeRecall, encoded as encode_episode
 from .episode_forgetting import EpisodeForget
@@ -81,16 +81,14 @@ class ElmMemoryProvider(MemoryProvider):
 
     @property
     def name(self):
-        return "elm"
+        return "elm-wiki"
 
     def _workspace_selected(self):
-        from .workspace_service import WorkspaceService
-        return self._home is not None and WorkspaceService.mode_present(self._home)
+        # Workspace mode needed a Hermes host patch (session -> project API) and was removed.
+        return False
 
     def _require_legacy_mode(self, home=None):
-        from .workspace_service import WorkspaceService
-        if (home is not None and WorkspaceService.mode_present(home)) or self._workspace_selected():
-            raise ElmError("workspace_restart_required", "Workspace memory was explicitly selected; start a fresh provider/session. No legacy fallback was used.")
+        return None
 
     def is_available(self):
         from hermes_constants import get_hermes_home
@@ -219,8 +217,7 @@ class ElmMemoryProvider(MemoryProvider):
                 try:
                     revision = _IndexRevision(self._binding.path / ".elm/index.sqlite", self._binding.project)
                     if self._binding.budget_mode == "measured":
-                        from agent.memory_context import build_memory_context_block
-                        measured = self._measured_context(query, formatter=build_memory_context_block,
+                        measured = self._measured_context(query, formatter=memory_fence,
                                                           host_max_chars=self._host_max_chars)
                         result = {"packet": measured["packet"]}
                     else:
@@ -261,10 +258,9 @@ class ElmMemoryProvider(MemoryProvider):
                 if (not self._closed and not self._workspace_selected() and self._cache is cached and key[0] == self._session_id
                         and status["healthy"] and cached[2].current()):
                     if self._binding.budget_mode == "measured":
-                        from agent.memory_context import build_memory_context_block
                         from .packet import dictionary_source_count
                         packet = cached[1]
-                        surface = background_surface(packet, build_memory_context_block)
+                        surface = background_surface(packet, memory_fence)
                         counter = self._counter()
                         count = dictionary_source_count(packet)
                         if (self._host_max_chars is None or len(packet) > self._host_max_chars
